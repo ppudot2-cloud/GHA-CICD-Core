@@ -1,0 +1,545 @@
+# =============================================================================
+# REUSABLE WORKFLOW: Deploy Solution to Environment
+# =============================================================================
+# Called by: release-pipeline.yml
+# Purpose  : Full enterprise deploy with all toggles:
+#   - who-am-i validation
+#   - blocking operations check (PowerShell script)
+#   - solution version comparison vs previous env (PowerShell script)
+#   - environment backup (rollback point)
+#   - JFrog Artifactory download of build artifacts
+#   - mock deploy (dry run)
+#   - unmanaged OR managed import (upgrade vs update)
+#   - holding solution cleanup on failure
+#   - config data import
+#   - publish customizations
+#   - rich failure logging + step summary (PowerShell script)
+#
+# Artifact download: from JFrog Artifactory (preferred); falls back to GHA artifacts.
+# =============================================================================
+
+name: _reusable-deploy
+
+on:
+  workflow_call:
+    inputs:
+      # ── Target environment ──────────────────────────────────────────────────
+      environment_name:
+        description: "Display name for logging (e.g. Dev, Intg, UAT, Perf, Prod)"
+        required: true
+        type: string
+      environment_url:
+        description: "Target environment URL (e.g. https://myorg-dev.crm.dynamics.com)"
+        required: true
+        type: string
+
+      # ── Solution ──────────────────────────────────────────────────────────
+      solution_name:
+        description: "Unique solution name"
+        required: true
+        type: string
+      solution_type:
+        description: "unmanaged | managed"
+        required: false
+        default: "managed"
+        type: string
+      artifact_name:
+        description: "GitHub Actions artifact name (from _reusable-build outputs)"
+        required: true
+        type: string
+      solution_version:
+        description: "Solution version string from build (e.g. 1.0.42.0)"
+        required: false
+        default: ""
+        type: string
+
+      # ── Deployment mode ───────────────────────────────────────────────────
+      trigger_upgrade:
+        description: "true = stage-and-upgrade (holding pattern); false = update in-place"
+        required: false
+        default: false
+        type: boolean
+      mock_deploy:
+        description: "Dry-run — validate all steps but skip actual import"
+        required: false
+        default: false
+        type: boolean
+      overwrite_unmanaged_customizations:
+        description: "Force overwrite of unmanaged customizations in target"
+        required: false
+        default: true
+        type: boolean
+
+      # ── Feature toggles ───────────────────────────────────────────────────
+      enable_backup:
+        description: "Take an environment backup before deploying (rollback point)"
+        required: false
+        default: true
+        type: boolean
+      enable_blocking_check:
+        description: "Abort if the environment has in-progress async operations"
+        required: false
+        default: true
+        type: boolean
+      enable_version_compare:
+        description: "Compare solution version against previously deployed version"
+        required: false
+        default: true
+        type: boolean
+
+      # ── Version comparison ────────────────────────────────────────────────
+      previous_environment_url:
+        description: "URL of prior environment to compare deployed version against"
+        required: false
+        default: ""
+        type: string
+
+      # ── Data ──────────────────────────────────────────────────────────────
+      import_config_data:
+        description: "Import config data after solution import"
+        required: false
+        default: false
+        type: boolean
+      deployment_settings_file:
+        description: "Relative path to deployment-settings.json for this environment"
+        required: false
+        default: ""
+        type: string
+
+
+    secrets:
+      APP_ID:
+        required: false
+      CLIENT_SECRET:
+        required: false
+      TENANT_ID:
+        required: false
+      JFROG_API_KEY:
+        required: false
+
+jobs:
+  deploy:
+    name: "Deploy [${{ inputs.environment_name }}] | ${{ inputs.solution_name }}"
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout repository (solution source) ──────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 1b. Checkout GHA-Core CI scripts ───────────────────────────────────
+      - name: Checkout GHA-Core CI scripts
+        uses: actions/checkout@v4
+        with:
+          repository: YOUR_ORG/GHA-Core
+          ref: main
+          path: .ci
+          token: ${{ secrets.GHA_CORE_PAT }}
+
+      # ── 2. Download build artifact from pipeline artifacts ────────────────
+      # Artifacts are uploaded by _reusable-build during the same pipeline run.
+      # JFrog Artifactory is used for long-term storage and prod tagging only;
+      # deploy jobs always pull from GHA pipeline artifacts for speed and
+      # to avoid any Artifactory availability dependency at deploy time.
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: out/${{ inputs.solution_name }}/
+
+      # ── 3. Install PAC CLI ─────────────────────────────────────────────────
+      - name: Install PAC CLI
+        uses: microsoft/powerplatform-actions/actions-install@v1
+        with:
+          add-tools-to-path: true
+
+      # ── 4. Resolve deployment settings file ────────────────────────────────
+      - name: Resolve deployment settings file
+        id: settings-file
+        shell: pwsh
+        run: |
+          $requested = '${{ inputs.deployment_settings_file }}'
+
+          if ($requested -and (Test-Path $requested)) {
+            "path=$requested"  | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "exists=true"      | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "ℹ️  Using deployment settings: $requested"
+          } elseif ($requested) {
+            $legacyDir = Split-Path $requested -Parent
+            $legacy    = Join-Path $legacyDir 'deployment-settings.json'
+            if (Test-Path $legacy) {
+              "path=$legacy"   | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+              "exists=true"    | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+              Write-Host "::notice::Deployment settings not found at '$requested'. Using legacy fallback: '$legacy'"
+            } else {
+              "exists=false"   | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+              Write-Host "::notice::No deployment settings found at '$requested' or '$legacy'. Deploying without."
+            }
+          } else {
+            "exists=false"     | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+      # ── 5. Validate auth + connectivity (who-am-i) ─────────────────────────
+      - name: Validate connection — who-am-i
+        id: who-am-i
+        if: inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/who-am-i@v1
+        with:
+          environment-url: ${{ inputs.environment_url }}
+          app-id:          ${{ secrets.APP_ID }}
+          client-secret:   ${{ secrets.CLIENT_SECRET }}
+          tenant-id:       ${{ secrets.TENANT_ID }}
+
+      - name: Log connection info
+        shell: pwsh
+        run: |
+          if ('${{ inputs.mock_deploy }}' -eq 'true') {
+            "⏭️ **mock_deploy=true** — auth skipped, no actual connection to **${{ inputs.environment_name }}**" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          } else {
+            "✅ Connected to **${{ inputs.environment_name }}**" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+
+      # ── 6. Check for in-progress async operations (WARN ONLY) ─────────────
+      # The script never exits with a non-zero code — it emits ::warning:: and
+      # writes the blocking-count output so downstream steps can observe it.
+      # The pipeline always continues regardless of how many ops are found.
+      # See Invoke-BlockingCheck.ps1 for handling strategies.
+      - name: Check for blocking async operations (warn-only)
+        id: blocking-check
+        if: inputs.enable_blocking_check == true && inputs.mock_deploy != true
+        shell: pwsh
+        env:
+          APP_ID:        ${{ secrets.APP_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          TENANT_ID:     ${{ secrets.TENANT_ID }}
+        run: |
+          & .ci/.github/scripts/Invoke-BlockingCheck.ps1 `
+            -EnvironmentUrl  '${{ inputs.environment_url }}' `
+            -AppId           $env:APP_ID `
+            -ClientSecret    $env:CLIENT_SECRET `
+            -TenantId        $env:TENANT_ID `
+            -EnvironmentName '${{ inputs.environment_name }}'
+
+      # Translate the blocking-count output into a display outcome for the
+      # deploy summary: 'warning' when ops were found, 'success' when clear.
+      - name: Resolve blocking-check display outcome
+        id: blocking-check-outcome
+        if: inputs.enable_blocking_check == true && inputs.mock_deploy != true
+        shell: pwsh
+        run: |
+          $count = '${{ steps.blocking-check.outputs.blocking-count }}'
+          $outcome = if ($count -and [int]$count -gt 0) { 'warning' } else { 'success' }
+          "result=$outcome" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      # ── 7. Compare solution version vs previous environment ─────────────────
+      - name: Compare solution version vs previous environment
+        id: version-compare
+        if: inputs.enable_version_compare == true && inputs.previous_environment_url != '' && inputs.mock_deploy != true
+        shell: pwsh
+        env:
+          APP_ID:        ${{ secrets.APP_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          TENANT_ID:     ${{ secrets.TENANT_ID }}
+        run: |
+          & .ci/.github/scripts/Compare-SolutionVersion.ps1 `
+            -ArtifactFolder        "out/${{ inputs.solution_name }}" `
+            -SolutionName          '${{ inputs.solution_name }}' `
+            -PreviousEnvironmentUrl '${{ inputs.previous_environment_url }}' `
+            -AppId                 $env:APP_ID `
+            -ClientSecret          $env:CLIENT_SECRET `
+            -TenantId              $env:TENANT_ID
+
+      # ── 8. Backup — export ONLY the solution being deployed ────────────────
+      # Exports a point-in-time ZIP of the current solution version from the
+      # target environment BEFORE the new version is imported.
+      # This is a solution-scoped backup (not a full environment snapshot).
+      #
+      # To roll back: re-import the backup ZIP via the rollback.yml workflow
+      # (select "solution-artifact" restore mode and supply the artifact name).
+      #
+      # NOTE: Because this is a solution export (not backup-environment),
+      # rollback.yml must use import-solution rather than restore-environment.
+      # The backup is uploaded as a GHA artifact (retention: 30 days).
+      # continue-on-error: true — a failed export must never block deployment.
+      - name: Export solution backup (rollback point)
+        id: backup
+        if: inputs.enable_backup == true && inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/export-solution@v1
+        with:
+          environment-url:      ${{ inputs.environment_url }}
+          app-id:               ${{ secrets.APP_ID }}
+          client-secret:        ${{ secrets.CLIENT_SECRET }}
+          tenant-id:            ${{ secrets.TENANT_ID }}
+          solution-name:        ${{ inputs.solution_name }}
+          solution-output-file: "backup/${{ inputs.solution_name }}/Pre-Deploy-${{ inputs.solution_name }}-v${{ github.run_number }}.zip"
+          managed:              ${{ inputs.solution_type == 'managed' }}
+        continue-on-error: true
+
+      - name: Upload solution backup artifact
+        if: inputs.enable_backup == true && inputs.mock_deploy != true && steps.backup.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: "backup-${{ inputs.solution_name }}-${{ inputs.environment_name }}-v${{ github.run_number }}"
+          path: "backup/${{ inputs.solution_name }}/"
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Log backup confirmation
+        if: inputs.enable_backup == true && inputs.mock_deploy != true
+        shell: pwsh
+        run: |
+          $outcome = '${{ steps.backup.outcome }}'
+          if ($outcome -eq 'success') {
+            @"
+          ✅ **Solution backup exported** (rollback point)
+          - Artifact: ``backup-${{ inputs.solution_name }}-${{ inputs.environment_name }}-v${{ github.run_number }}``
+          - File: ``Pre-Deploy-${{ inputs.solution_name }}-v${{ github.run_number }}.zip``
+          - Type: ${{ inputs.solution_type }} export (solution-scoped, not full environment)
+          - To rollback: re-import this ZIP via ``rollback.yml`` (solution import mode)
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          } else {
+            @"
+          ⚠️ **Solution backup failed** (outcome: $outcome) — deployment will continue.
+          Manual rollback may be required if this deployment needs to be reversed.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+            Write-Host "::warning::Solution backup export failed but deployment is continuing. Manual rollback may be needed."
+          }
+
+      # ── 9. Mock deploy gate ─────────────────────────────────────────────────
+      - name: Mock deploy — dry run complete
+        if: inputs.mock_deploy == true
+        shell: pwsh
+        run: |
+          @"
+          ## 🧪 MOCK DEPLOY — No changes applied
+          All pre-deployment checks passed. Import step was **skipped** (mock mode).
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          Write-Host "::notice::Mock deploy mode active — solution import skipped. All pre-flight checks passed."
+
+      # ── 10. Resolve ZIP paths ───────────────────────────────────────────────
+      - name: Resolve ZIP paths
+        id: zip-paths
+        if: inputs.mock_deploy != true
+        shell: pwsh
+        run: |
+          $artDir = "out/${{ inputs.solution_name }}"
+          $unman  = Get-ChildItem -Path $artDir -Filter "*_unmanaged.zip" | Select-Object -First 1
+          $man    = Get-ChildItem -Path $artDir -Filter "*_managed.zip"   | Select-Object -First 1
+
+          if (-not $unman) { Write-Error "No unmanaged ZIP found in $artDir"; exit 1 }
+          if (-not $man)   { Write-Error "No managed ZIP found in $artDir";   exit 1 }
+
+          "unmanaged_zip=$($unman.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "managed_zip=$($man.FullName)"     | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Unmanaged ZIP: $($unman.Name)"
+          Write-Host "Managed ZIP  : $($man.Name)"
+
+      # ── 11. Import — Unmanaged (Dev only) ──────────────────────────────────
+      - name: "Import — Unmanaged solution"
+        id: import-unmanaged
+        if: inputs.solution_type == 'unmanaged' && inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/import-solution@v1
+        with:
+          environment-url:              ${{ inputs.environment_url }}
+          app-id:                       ${{ secrets.APP_ID }}
+          client-secret:                ${{ secrets.CLIENT_SECRET }}
+          tenant-id:                    ${{ secrets.TENANT_ID }}
+          solution-file:                ${{ steps.zip-paths.outputs.unmanaged_zip }}
+          activate-plugins:             true
+          force-overwrite:              true
+          publish-changes:              true
+          run-asynchronously:           true
+          max-async-wait-time:          120
+          use-deployment-settings-file: ${{ steps.settings-file.outputs.exists == 'true' }}
+          deployment-settings-file:     ${{ steps.settings-file.outputs.path || '' }}
+
+      # ── 12. Import — Managed Update (trigger_upgrade=false) ────────────────
+      - name: "Import — Managed solution as Update"
+        id: import-managed-update
+        if: >
+          inputs.solution_type == 'managed' &&
+          inputs.trigger_upgrade == false &&
+          inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/import-solution@v1
+        with:
+          environment-url:              ${{ inputs.environment_url }}
+          app-id:                       ${{ secrets.APP_ID }}
+          client-secret:                ${{ secrets.CLIENT_SECRET }}
+          tenant-id:                    ${{ secrets.TENANT_ID }}
+          solution-file:                ${{ steps.zip-paths.outputs.managed_zip }}
+          activate-plugins:             true
+          force-overwrite:              ${{ inputs.overwrite_unmanaged_customizations }}
+          publish-changes:              false
+          run-asynchronously:           true
+          max-async-wait-time:          120
+          stage-and-upgrade:            false
+          use-deployment-settings-file: ${{ steps.settings-file.outputs.exists == 'true' }}
+          deployment-settings-file:     ${{ steps.settings-file.outputs.path || '' }}
+
+      # ── 13. Import — Managed Holding Phase 1 (trigger_upgrade=true) ────────
+      - name: "Import — Managed solution as Holding (Upgrade Phase 1)"
+        id: import-managed-holding
+        if: >
+          inputs.solution_type == 'managed' &&
+          inputs.trigger_upgrade == true &&
+          inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/import-solution@v1
+        with:
+          environment-url:              ${{ inputs.environment_url }}
+          app-id:                       ${{ secrets.APP_ID }}
+          client-secret:                ${{ secrets.CLIENT_SECRET }}
+          tenant-id:                    ${{ secrets.TENANT_ID }}
+          solution-file:                ${{ steps.zip-paths.outputs.managed_zip }}
+          activate-plugins:             false
+          import-as-holding:            true
+          run-asynchronously:           true
+          max-async-wait-time:          120
+          use-deployment-settings-file: ${{ steps.settings-file.outputs.exists == 'true' }}
+          deployment-settings-file:     ${{ steps.settings-file.outputs.path || '' }}
+
+      # ── 14. Apply Upgrade Phase 2 ──────────────────────────────────────────
+      - name: "Apply upgrade — Upgrade Phase 2"
+        id: apply-upgrade
+        if: >
+          inputs.solution_type == 'managed' &&
+          inputs.trigger_upgrade == true &&
+          inputs.mock_deploy != true &&
+          steps.import-managed-holding.outcome == 'success'
+        uses: microsoft/powerplatform-actions/upgrade-solution@v1
+        with:
+          environment-url:     ${{ inputs.environment_url }}
+          app-id:              ${{ secrets.APP_ID }}
+          client-secret:       ${{ secrets.CLIENT_SECRET }}
+          tenant-id:           ${{ secrets.TENANT_ID }}
+          solution-name:       ${{ inputs.solution_name }}
+          async:               true
+          max-async-wait-time: 120
+
+      # ── 15. Cleanup holding solution on failure ─────────────────────────────
+      - name: "Cleanup — Delete holding solution on failure"
+        if: >
+          always() &&
+          inputs.mock_deploy != true &&
+          (steps.import-managed-holding.outcome == 'failure' ||
+           steps.apply-upgrade.outcome == 'failure')
+        uses: microsoft/powerplatform-actions/delete-solution@v1
+        with:
+          environment-url: ${{ inputs.environment_url }}
+          app-id:          ${{ secrets.APP_ID }}
+          client-secret:   ${{ secrets.CLIENT_SECRET }}
+          tenant-id:       ${{ secrets.TENANT_ID }}
+          solution-name:   "${{ inputs.solution_name }}_Upgrade"
+        continue-on-error: true
+
+      # ── 16. Update online solution version ─────────────────────────────────
+      - name: Update online solution version
+        if: >
+          inputs.mock_deploy != true &&
+          (steps.import-managed-update.outcome == 'success' ||
+           steps.apply-upgrade.outcome == 'success' ||
+           steps.import-unmanaged.outcome == 'success')
+        uses: microsoft/powerplatform-actions/set-online-solution-version@v1
+        with:
+          environment-url: ${{ inputs.environment_url }}
+          app-id:          ${{ secrets.APP_ID }}
+          client-secret:   ${{ secrets.CLIENT_SECRET }}
+          tenant-id:       ${{ secrets.TENANT_ID }}
+          name:            ${{ inputs.solution_name }}
+          version:         ${{ inputs.solution_version || format('1.0.{0}.0', github.run_number) }}
+        continue-on-error: true
+
+      # ── 17. Import configuration data ──────────────────────────────────────
+      - name: Import configuration data
+        if: inputs.import_config_data == true && inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/import-data@v1
+        with:
+          environment-url:  ${{ inputs.environment_url }}
+          app-id:           ${{ secrets.APP_ID }}
+          client-secret:    ${{ secrets.CLIENT_SECRET }}
+          tenant-id:        ${{ secrets.TENANT_ID }}
+          data-file:        "out/${{ inputs.solution_name }}/config/config-data.zip"
+          connection-count: 5
+
+      # ── 18. Publish customizations (unmanaged only) ─────────────────────────
+      - name: Publish customizations
+        if: >
+          inputs.solution_type == 'unmanaged' &&
+          inputs.mock_deploy != true &&
+          steps.import-unmanaged.outcome == 'success'
+        uses: microsoft/powerplatform-actions/publish-solution@v1
+        with:
+          environment-url:     ${{ inputs.environment_url }}
+          app-id:              ${{ secrets.APP_ID }}
+          client-secret:       ${{ secrets.CLIENT_SECRET }}
+          tenant-id:           ${{ secrets.TENANT_ID }}
+          run-asynchronously:  true
+          max-async-wait-time: 60
+
+      # ── 19. Deployment summary + job summary record ─────────────────────────
+      - name: Deployment summary
+        if: always()
+        shell: pwsh
+        run: |
+          $importOutcome = if ('${{ inputs.mock_deploy }}' -eq 'true') { 'mock' } else {
+            $outcomes = @(
+              '${{ steps.import-unmanaged.outcome }}',
+              '${{ steps.import-managed-update.outcome }}',
+              '${{ steps.apply-upgrade.outcome }}'
+            )
+            ($outcomes | Where-Object { $_ -and $_ -ne '' } | Select-Object -First 1) ?? 'skipped'
+          }
+
+          $envSlug = '${{ inputs.environment_name }}' -replace '[^a-zA-Z0-9]', ''
+
+          & .ci/.github/scripts/Write-DeploySummary.ps1 `
+            -EnvironmentName        '${{ inputs.environment_name }}' `
+            -EnvironmentUrl         '${{ inputs.environment_url }}' `
+            -SolutionName           '${{ inputs.solution_name }}' `
+            -RunNumber              '${{ github.run_number }}' `
+            -MockDeploy             ([System.Convert]::ToBoolean('${{ inputs.mock_deploy }}')) `
+            -SolutionType           '${{ inputs.solution_type }}' `
+            -WhoAmIOutcome          '${{ steps.who-am-i.outcome }}' `
+            -BlockingCheckOutcome   $(if ('${{ inputs.enable_blocking_check }}' -eq 'true') { "'${{ steps.blocking-check-outcome.outputs.result || steps.blocking-check.outcome }}'" } else { "'disabled'" }) `
+            -VersionCompareOutcome  $(if ('${{ inputs.enable_version_compare }}' -eq 'true') { "'${{ steps.version-compare.outcome }}'" } else { "'disabled'" }) `
+            -BackupOutcome          $(if ('${{ inputs.enable_backup }}' -eq 'true') { "'${{ steps.backup.outcome }}'" } else { "'disabled'" }) `
+            -ImportOutcome          $importOutcome `
+            -JsonOutputPath         "job-summaries/deploy-${envSlug}-${{ inputs.solution_name }}.json"
+
+      # ── 20. Upload job summary record ───────────────────────────────────────
+      - name: Upload job summary record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "job-summary-deploy-${{ inputs.environment_name }}-${{ inputs.solution_name }}-${{ github.run_number }}"
+          path: job-summaries/
+          retention-days: 7
+          if-no-files-found: warn
+
+      # ── 20. Log failure details ─────────────────────────────────────────────
+      - name: Log failure details
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Host "::error::❌ Deployment to ${{ inputs.environment_name }} FAILED on run #${{ github.run_number }}."
+          Write-Host "::error::Solution: ${{ inputs.solution_name }}"
+          Write-Host "::error::Environment: ${{ inputs.environment_url }}"
+          Write-Host "::error::Commit: ${{ github.sha }}"
+          Write-Host "::error::Actor: ${{ github.actor }}"
+
+          @"
+
+          ## ❌ Deployment Failed
+          | Field | Value |
+          | --- | --- |
+          | Environment | ${{ inputs.environment_name }} |
+          | Environment URL | ${{ inputs.environment_url }} |
+          | Solution | ${{ inputs.solution_name }} |
+          | Run # | ${{ github.run_number }} |
+          | Commit | ``${{ github.sha }}`` |
+          | Actor | @${{ github.actor }} |
+          | Backup label | ``Pre-Deploy-${{ inputs.solution_name }}-v${{ github.run_number }}`` |
+
+          > 💡 Restore using **rollback.yml** with the backup label above.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append

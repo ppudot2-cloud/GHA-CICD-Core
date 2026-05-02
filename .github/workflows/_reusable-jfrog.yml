@@ -1,0 +1,200 @@
+# =============================================================================
+# REUSABLE WORKFLOW: JFrog Artifactory — Upload / Download / Tag
+# =============================================================================
+# Called by: release-pipeline.yml (upload after build), _reusable-deploy.yml
+#            (download before import), and on-demand for tagging.
+#
+# Artifactory path convention:
+#   {jfrog_repo}/{github_repo_name}/{solution_name}/{run_number}/{run_attempt}/
+#
+# Actions:
+#   upload   – pushes all *.zip files from artifact_local_path to Artifactory
+#   download – pulls all *.zip files from Artifactory to artifact_local_path
+#   tag      – sets item properties on remote artifacts (e.g. pipeline=release)
+#
+# MOCK MODE (mock_deploy=true):
+#   upload / tag – prints target paths, no network calls made
+#   download     – skipped (deploy also runs in mock mode, no ZIPs needed)
+# =============================================================================
+
+name: _reusable-jfrog
+
+on:
+  workflow_call:
+    inputs:
+      action:
+        description: "Action to perform: upload | download | tag"
+        required: true
+        type: string
+
+      solution_name:
+        description: "Unique solution name (used in remote path)"
+        required: true
+        type: string
+
+      jfrog_url:
+        description: "JFrog Artifactory base URL (e.g. https://company.jfrog.io/artifactory)"
+        required: true
+        type: string
+
+      jfrog_repo:
+        description: "Artifactory repository name (e.g. powerplatform-solutions)"
+        required: false
+        default: "powerplatform-solutions"
+        type: string
+
+      artifact_local_path:
+        description: >
+          For upload: local folder containing *.zip files to push.
+          For download: local folder to receive downloaded ZIPs.
+        required: false
+        default: "out"
+        type: string
+
+      build_run_number:
+        description: >
+          The run_number of the build that produced the artifacts.
+          Defaults to current run_number. Override in deploy jobs to reference
+          the exact build run (e.g. pass build job output).
+        required: false
+        default: ""
+        type: string
+
+      build_run_attempt:
+        description: "The run_attempt of the build. Defaults to current run_attempt."
+        required: false
+        default: ""
+        type: string
+
+      tag_properties:
+        description: >
+          For tag action: semicolon-separated key=value pairs to set on remote artifacts.
+          (e.g. "pipeline=release;approved=true;environment=prod")
+        required: false
+        default: ""
+        type: string
+
+      mock_deploy:
+        description: "Dry-run — simulate without making network calls to Artifactory"
+        required: false
+        default: false
+        type: boolean
+
+    secrets:
+      JFROG_API_KEY:
+        required: false
+
+    outputs:
+      remote_path:
+        description: "Full Artifactory path used for this run"
+        value: ${{ jobs.jfrog.outputs.remote_path }}
+
+jobs:
+  jfrog:
+    name: "JFrog ${{ inputs.action }} | ${{ inputs.solution_name }}"
+    runs-on: ubuntu-latest
+    outputs:
+      remote_path: ${{ steps.set-path.outputs.remote_path }}
+
+    steps:
+      # ── 1. Checkout repository + GHA-Core CI scripts ──────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 1b. Checkout GHA-Core CI scripts ───────────────────────────────────
+      - name: Checkout GHA-Core CI scripts
+        uses: actions/checkout@v4
+        with:
+          repository: YOUR_ORG/GHA-Core
+          ref: main
+          path: .ci
+          token: ${{ secrets.GHA_CORE_PAT }}
+
+      # ── 2. Validate inputs ──────────────────────────────────────────────────
+      - name: Validate inputs
+        shell: pwsh
+        run: |
+          $action = '${{ inputs.action }}'
+          if ($action -notin @('upload','download','tag')) {
+            Write-Error "::error::Invalid action '$action'. Must be one of: upload, download, tag"
+            exit 1
+          }
+
+          $mock     = '${{ inputs.mock_deploy }}' -eq 'true'
+          $jfrogUrl = '${{ inputs.jfrog_url }}'
+          if (-not $mock -and -not $jfrogUrl) {
+            Write-Error "::error::jfrog_url is required for non-mock JFrog operations."
+            exit 1
+          }
+
+          $apiKey = '${{ secrets.JFROG_API_KEY }}'
+          if (-not $apiKey -and -not $mock) {
+            Write-Error "::error::JFROG_API_KEY secret is not set. Required for non-mock JFrog operations."
+            exit 1
+          }
+
+          Write-Host "✅ Inputs validated — action=$action mock=${{ inputs.mock_deploy }}"
+
+      # ── 3. Set remote path output ───────────────────────────────────────────
+      - name: Set remote path
+        id: set-path
+        shell: pwsh
+        run: |
+          $repoName   = '${{ github.event.repository.name }}'
+          $solution   = '${{ inputs.solution_name }}'
+          $runNum     = if ('${{ inputs.build_run_number }}') { '${{ inputs.build_run_number }}' } else { '${{ github.run_number }}' }
+          $runAttempt = if ('${{ inputs.build_run_attempt }}') { '${{ inputs.build_run_attempt }}' } else { '${{ github.run_attempt }}' }
+
+          $remotePath = "${{ inputs.jfrog_repo }}/$repoName/$solution/$runNum/$runAttempt"
+          "remote_path=$remotePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Remote path: $remotePath"
+
+      # ── 4. Download GHA artifact (upload action only) ──────────────────────
+      - name: Download GHA artifact (for upload)
+        if: inputs.action == 'upload'
+        uses: actions/download-artifact@v4
+        with:
+          name: "solution-${{ inputs.solution_name }}-${{ inputs.build_run_number || github.run_number }}"
+          path: ${{ inputs.artifact_local_path }}
+        continue-on-error: true   # artifact may already be on disk
+
+      # ── 4b. Append deploy date to tag properties (tag action only) ─────────
+      # Automatically adds deployedDate=<yyyy-MM-dd> so callers don't need
+      # to compute the date — just pass prodDeployed=true in tag_properties.
+      - name: Append deploy date to tag properties
+        id: tag-meta
+        if: inputs.action == 'tag'
+        shell: pwsh
+        run: |
+          $date  = Get-Date -Format 'yyyy-MM-dd'
+          $props = '${{ inputs.tag_properties }}'.TrimEnd(';')
+          if ($props) { $props = "$props;deployedDate=$date" }
+          else        { $props = "deployedDate=$date" }
+          "tag_properties=$props" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Tag properties: $props"
+
+      # ── 5. Execute JFrog action ─────────────────────────────────────────────
+      - name: "JFrog ${{ inputs.action }}"
+        shell: pwsh
+        env:
+          JFROG_API_KEY: ${{ secrets.JFROG_API_KEY }}
+        run: |
+          $repoName   = '${{ github.event.repository.name }}'
+          $runNum     = if ('${{ inputs.build_run_number }}') { '${{ inputs.build_run_number }}' } else { '${{ github.run_number }}' }
+          $runAttempt = if ('${{ inputs.build_run_attempt }}') { '${{ inputs.build_run_attempt }}' } else { '${{ github.run_attempt }}' }
+          # For tag action, use the date-enriched properties; otherwise use inputs directly
+          $tagProps   = if ('${{ inputs.action }}' -eq 'tag') { '${{ steps.tag-meta.outputs.tag_properties }}' } `
+                        else { '${{ inputs.tag_properties }}' }
+
+          & .ci/.github/scripts/Invoke-JFrogAction.ps1 `
+            -Action        '${{ inputs.action }}' `
+            -JFrogUrl      '${{ inputs.jfrog_url }}' `
+            -JFrogRepo     '${{ inputs.jfrog_repo }}' `
+            -ApiKey        $env:JFROG_API_KEY `
+            -SolutionName  '${{ inputs.solution_name }}' `
+            -RepoName      $repoName `
+            -RunNumber     $runNum `
+            -RunAttempt    $runAttempt `
+            -LocalPath     '${{ inputs.artifact_local_path }}' `
+            -TagProperties $tagProps `
+            -MockDeploy    ([System.Convert]::ToBoolean('${{ inputs.mock_deploy }}'))

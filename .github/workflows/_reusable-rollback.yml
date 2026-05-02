@@ -1,0 +1,294 @@
+# =============================================================================
+# REUSABLE WORKFLOW: Solution Rollback
+# =============================================================================
+# Called by: GHA-Dynamics/.github/workflows/rollback.yml (thin wrapper)
+# Purpose  : Re-imports a solution backup ZIP that was exported by the deploy
+#            job BEFORE the new version was imported, rolling back only the
+#            specified solution. The rest of the environment is untouched.
+#
+# NOTE: vars.* do not cross repository boundaries in reusable workflows.
+# All environment URLs are passed as explicit string inputs by the caller.
+#
+# NOTE: workflow_call inputs do not support type: choice. The target-environment
+# choice constraint is enforced by the workflow_dispatch in rollback.yml.
+# Here it is received as a plain string.
+#
+# LIMITATION: If the deployment used trigger_upgrade (holding pattern) and
+# removed components, those components are NOT restored by this import.
+# Use a full environment restore for that case.
+# =============================================================================
+
+name: _reusable-rollback
+
+on:
+  workflow_call:
+    inputs:
+      # ── User-facing inputs (forwarded from rollback.yml) ────────────────────
+      target-environment:
+        description: "Environment to roll back (Dev | Intg | UAT | Perf | Prod)"
+        required: true
+        type: string
+
+      solution-name:
+        description: "Name of the solution to roll back"
+        required: true
+        type: string
+
+      run-number:
+        description: "Run number of the deployment to roll back FROM"
+        required: true
+        type: string
+
+      deployment-settings-file:
+        description: "Optional: relative path to deployment-settings.json"
+        required: false
+        default: ''
+        type: string
+
+      confirm-rollback:
+        description: "Must be 'CONFIRM' to proceed"
+        required: true
+        type: string
+
+      # ── Environment URLs (caller passes vars.*) ─────────────────────────────
+      pp-dev-url:
+        description: "Dev environment URL (caller passes vars.PP_DEV_URL)"
+        required: false
+        default: ''
+        type: string
+
+      pp-intg-url:
+        description: "Intg environment URL (caller passes vars.PP_INTG_URL)"
+        required: false
+        default: ''
+        type: string
+
+      pp-uat-url:
+        description: "UAT environment URL (caller passes vars.PP_UAT_URL)"
+        required: false
+        default: ''
+        type: string
+
+      pp-perf-url:
+        description: "Perf environment URL (caller passes vars.PP_PERF_URL)"
+        required: false
+        default: ''
+        type: string
+
+      pp-prod-url:
+        description: "Prod environment URL (caller passes vars.PP_PROD_URL)"
+        required: false
+        default: ''
+        type: string
+
+    secrets:
+      APP_ID:
+        required: false
+      CLIENT_SECRET:
+        required: false
+      TENANT_ID:
+        required: false
+
+jobs:
+  rollback:
+    name: "🔄 Rollback [${{ inputs.target-environment }}] | ${{ inputs.solution-name }} ← v${{ inputs.run-number }}"
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target-environment }}   # enforces approval gates for UAT/Perf/Prod
+
+    steps:
+      # ── 1. Safety guard ───────────────────────────────────────────────────
+      - name: Confirm rollback intent
+        shell: pwsh
+        run: |
+          if ('${{ inputs.confirm-rollback }}' -ne 'CONFIRM') {
+            Write-Host "::error::Rollback aborted — type CONFIRM in the confirm-rollback input to proceed."
+            exit 1
+          }
+          Write-Host "✅ Rollback confirmed by @${{ github.actor }}"
+          Write-Host "   Solution  : ${{ inputs.solution-name }}"
+          Write-Host "   Restoring : backup from run #${{ inputs.run-number }}"
+          Write-Host "   Target    : ${{ inputs.target-environment }}"
+
+      # ── 2. Resolve environment URL and solution type ───────────────────────
+      - name: Resolve environment config
+        id: resolve-env
+        shell: pwsh
+        run: |
+          $envName = '${{ inputs.target-environment }}'
+          $urlMap  = @{
+            Dev  = '${{ inputs.pp-dev-url }}'
+            Intg = '${{ inputs.pp-intg-url }}'
+            UAT  = '${{ inputs.pp-uat-url }}'
+            Perf = '${{ inputs.pp-perf-url }}'
+            Prod = '${{ inputs.pp-prod-url }}'
+          }
+
+          if (-not $urlMap.ContainsKey($envName)) {
+            Write-Host "::error::Unknown environment '$envName'. Valid values: Dev, Intg, UAT, Perf, Prod."
+            exit 1
+          }
+
+          $envUrl = $urlMap[$envName]
+          if (-not $envUrl) {
+            Write-Host "::error::URL for environment '$envName' is empty. Verify the pp-$($envName.ToLower())-url input."
+            exit 1
+          }
+
+          # Dev is always unmanaged; all other environments are managed.
+          $solType = if ($envName -eq 'Dev') { 'unmanaged' } else { 'managed' }
+
+          "env-url=$envUrl"        | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "solution-type=$solType" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          Write-Host "Environment URL : $envUrl"
+          Write-Host "Solution type   : $solType"
+
+      # ── 3. Download backup artifact ────────────────────────────────────────
+      # Artifact uploaded by the backup step in _reusable-deploy.yml.
+      # Name pattern: backup-{solution}-{environment}-v{run-number}
+      - name: Download solution backup artifact
+        id: download-backup
+        uses: actions/download-artifact@v4
+        with:
+          name: "backup-${{ inputs.solution-name }}-${{ inputs.target-environment }}-v${{ inputs.run-number }}"
+          path: restore/
+
+      # ── 4. Locate backup ZIP ───────────────────────────────────────────────
+      - name: Locate backup ZIP
+        id: locate-zip
+        shell: pwsh
+        run: |
+          $zips = Get-ChildItem -Path restore/ -Filter "*.zip" -Recurse
+          if ($zips.Count -eq 0) {
+            Write-Host "::error::No ZIP file found in the downloaded backup artifact."
+            Write-Host "::error::Expected artifact: backup-${{ inputs.solution-name }}-${{ inputs.target-environment }}-v${{ inputs.run-number }}"
+            exit 1
+          }
+          $zip = $zips | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          "zip-path=$($zip.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Backup ZIP found: $($zip.Name) ($([Math]::Round($zip.Length / 1MB, 2)) MB)"
+
+      # ── 5. Checkout caller repo (for deployment settings files) ───────────
+      # actions/checkout without repository: checks out the CALLER repo (GHA-Dynamics)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 6. Resolve deployment settings file ───────────────────────────────
+      - name: Resolve deployment settings file
+        id: settings-file
+        shell: pwsh
+        run: |
+          $requested = '${{ inputs.deployment-settings-file }}'.Trim()
+          if ($requested -and (Test-Path $requested)) {
+            "path=$requested" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "exists=true"     | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "Using deployment settings: $requested"
+          } else {
+            "exists=false"    | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "No deployment settings file — rolling back without."
+          }
+
+      # ── 7. Install PAC CLI ─────────────────────────────────────────────────
+      - name: Install PAC CLI
+        uses: microsoft/powerplatform-actions/actions-install@v1
+        with:
+          add-tools-to-path: true
+
+      # ── 8. Validate connection ─────────────────────────────────────────────
+      - name: Validate connection — who-am-i
+        uses: microsoft/powerplatform-actions/who-am-i@v1
+        with:
+          environment-url: ${{ steps.resolve-env.outputs.env-url }}
+          app-id:          ${{ secrets.APP_ID }}
+          client-secret:   ${{ secrets.CLIENT_SECRET }}
+          tenant-id:       ${{ secrets.TENANT_ID }}
+
+      # ── 9a. Import backup — Unmanaged (Dev only) ───────────────────────────
+      - name: "Import backup — Unmanaged (Dev)"
+        id: import-unmanaged
+        if: steps.resolve-env.outputs.solution-type == 'unmanaged'
+        uses: microsoft/powerplatform-actions/import-solution@v1
+        with:
+          environment-url:               ${{ steps.resolve-env.outputs.env-url }}
+          app-id:                        ${{ secrets.APP_ID }}
+          client-secret:                 ${{ secrets.CLIENT_SECRET }}
+          tenant-id:                     ${{ secrets.TENANT_ID }}
+          solution-file:                 ${{ steps.locate-zip.outputs.zip-path }}
+          force-overwrite:               true
+          publish-changes:               true
+          activate-plugins:              true
+          run-asynchronously:            true
+          max-async-wait-time:           120
+          use-deployment-settings-file:  ${{ steps.settings-file.outputs.exists == 'true' }}
+          deployment-settings-file:      ${{ steps.settings-file.outputs.path || '' }}
+
+      # ── 9b. Import backup — Managed (Intg / UAT / Perf / Prod) ───────────
+      - name: "Import backup — Managed"
+        id: import-managed
+        if: steps.resolve-env.outputs.solution-type == 'managed'
+        uses: microsoft/powerplatform-actions/import-solution@v1
+        with:
+          environment-url:               ${{ steps.resolve-env.outputs.env-url }}
+          app-id:                        ${{ secrets.APP_ID }}
+          client-secret:                 ${{ secrets.CLIENT_SECRET }}
+          tenant-id:                     ${{ secrets.TENANT_ID }}
+          solution-file:                 ${{ steps.locate-zip.outputs.zip-path }}
+          force-overwrite:               true
+          activate-plugins:              true
+          run-asynchronously:            true
+          max-async-wait-time:           120
+          use-deployment-settings-file:  ${{ steps.settings-file.outputs.exists == 'true' }}
+          deployment-settings-file:      ${{ steps.settings-file.outputs.path || '' }}
+
+      # ── 10. Publish customizations (Dev / unmanaged only) ──────────────────
+      - name: Publish customizations
+        if: >
+          steps.resolve-env.outputs.solution-type == 'unmanaged' &&
+          steps.import-unmanaged.outcome == 'success'
+        uses: microsoft/powerplatform-actions/publish-solution@v1
+        with:
+          environment-url:     ${{ steps.resolve-env.outputs.env-url }}
+          app-id:              ${{ secrets.APP_ID }}
+          client-secret:       ${{ secrets.CLIENT_SECRET }}
+          tenant-id:           ${{ secrets.TENANT_ID }}
+          run-asynchronously:  true
+          max-async-wait-time: 60
+
+      # ── 11. Rollback summary ───────────────────────────────────────────────
+      - name: Rollback summary
+        if: always()
+        shell: pwsh
+        run: |
+          $importOutcome = if ('${{ steps.import-unmanaged.outcome }}' -notin @('', 'skipped')) {
+            '${{ steps.import-unmanaged.outcome }}'
+          } else {
+            '${{ steps.import-managed.outcome }}'
+          }
+          $resultIcon = if ($importOutcome -eq 'success') { '✅ Success' } else { '❌ Failed' }
+
+          @"
+          ## 🔄 Solution Rollback Summary
+          | Field | Value |
+          | --- | --- |
+          | Solution | ``${{ inputs.solution-name }}`` |
+          | Environment | **${{ inputs.target-environment }}** |
+          | Environment URL | ``${{ steps.resolve-env.outputs.env-url }}`` |
+          | Solution type | ${{ steps.resolve-env.outputs.solution-type }} |
+          | Restored from | Run **#${{ inputs.run-number }}** backup |
+          | Backup artifact | ``backup-${{ inputs.solution-name }}-${{ inputs.target-environment }}-v${{ inputs.run-number }}`` |
+          | Initiated by | @${{ github.actor }} |
+          | Result | $resultIcon |
+
+          > ⚠️ **Note:** If the rolled-back deployment used the upgrade/holding pattern
+          > and removed solution components, those components are NOT automatically restored
+          > by this solution import. A full environment restore would be required in that case.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      # ── 12. Log failure ────────────────────────────────────────────────────
+      - name: Log failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Host "::error::❌ Rollback of ${{ inputs.solution-name }} on ${{ inputs.target-environment }} FAILED."
+          Write-Host "::error::Actor: @${{ github.actor }} | Run: #${{ github.run_number }}"
+          Write-Host "::error::Backup artifact: backup-${{ inputs.solution-name }}-${{ inputs.target-environment }}-v${{ inputs.run-number }}"

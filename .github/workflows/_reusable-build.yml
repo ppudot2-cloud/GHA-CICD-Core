@@ -1,0 +1,556 @@
+# =============================================================================
+# REUSABLE WORKFLOW: Build & Pack Solution
+# =============================================================================
+# Called by: release-pipeline.yml
+# Purpose  : Packs solution source into managed + unmanaged ZIPs, stamps
+#            version, runs Solution Checker, exports config data, and uploads
+#            the complete package to JFrog Artifactory.
+#
+# Package uploaded to JFrog (under {repo}/{solution}/{run}/{attempt}/):
+#   {solution_name}-{version}_unmanaged.zip
+#   {solution_name}-{version}_managed.zip
+#   solution-checker/checker-report.sarif  (real mode)
+#   config/config-data.zip                 (if data_schema_file provided)
+#
+# JFrog upload fires AFTER Solution Checker passes, so only clean,
+# validated artifacts reach Artifactory.
+# After Prod deploy, release-pipeline.yml tags the artifact with
+#   prodDeployed=true;deployedDate=<date>
+#
+# MOCK_DEPLOY MODE (mock_deploy=true):
+#   Pack              → PowerShell mock (no PAC CLI — avoids null-ref on stubs)
+#   Solution Checker  → simulated ZIP structure + XML validation
+#   Export config     → simulated schema parse + placeholder ZIP
+#   JFrog upload      → simulated (no network call)
+#
+# MANDATORY INPUTS (enforced at runtime unless mock_deploy=true):
+#   enable_jfrog_upload must be true; jfrog_url must be set.
+# Solution Checker always runs in non-mock mode — there is no toggle.
+# =============================================================================
+
+name: _reusable-build
+
+on:
+  workflow_call:
+    inputs:
+      solution_name:
+        description: "Unique solution name (e.g. CoreSolution)"
+        required: true
+        type: string
+
+      solution_source_folder:
+        description: "Relative path to unpacked solution source (e.g. src/solutions/CoreSolution)"
+        required: true
+        type: string
+
+      checker_geo:
+        description: "Solution Checker geography endpoint (e.g. UnitedStates, Europe)"
+        required: false
+        default: "UnitedStates"
+        type: string
+
+      checker_error_level:
+        description: >
+          Minimum severity that fails the build. One of:
+          CriticalIssue | HighIssue | MediumIssue | LowIssue | InformationalIssue
+        required: false
+        default: "HighIssue"
+        type: string
+
+      build_version_strategy:
+        description: "Version strategy: 'run_number' (GitHub run as build) or 'gittags'"
+        required: false
+        default: "run_number"
+        type: string
+
+      data_schema_file:
+        description: "Relative path to Configuration Migration data schema XML (leave blank to skip)"
+        required: false
+        default: ""
+        type: string
+
+      source_environment_url:
+        description: "Source environment URL (used for Solution Checker auth in real mode)"
+        required: false
+        default: ""
+        type: string
+
+      mock_deploy:
+        description: >
+          Dry-run mode — pack runs as simulation (no PAC CLI); Solution Checker,
+          config export, and JFrog upload run as simulations. No PP credentials required.
+        required: false
+        default: false
+        type: boolean
+
+      enable_jfrog_upload:
+        description: "Upload the complete build package to JFrog Artifactory. MANDATORY unless mock_deploy=true."
+        required: false
+        default: true
+        type: boolean
+
+      jfrog_url:
+        description: "JFrog Artifactory base URL (e.g. https://company.jfrog.io/artifactory)"
+        required: false
+        default: ""
+        type: string
+
+      jfrog_repo:
+        description: "Artifactory repository name (e.g. powerplatform-solutions)"
+        required: false
+        default: "powerplatform-solutions"
+        type: string
+
+    secrets:
+      APP_ID:
+        required: false
+      CLIENT_SECRET:
+        required: false
+      TENANT_ID:
+        required: false
+      JFROG_API_KEY:
+        required: false
+
+    outputs:
+      solution_version:
+        description: "Stamped solution version (e.g. 1.0.42.0)"
+        value: ${{ jobs.build.outputs.solution_version }}
+      artifact_name:
+        description: "GitHub Actions artifact name for this build"
+        value: ${{ jobs.build.outputs.artifact_name }}
+      unmanaged_zip:
+        description: "Relative path to the unmanaged ZIP inside the artifact"
+        value: ${{ jobs.build.outputs.unmanaged_zip }}
+      managed_zip:
+        description: "Relative path to the managed ZIP inside the artifact"
+        value: ${{ jobs.build.outputs.managed_zip }}
+      checker_artifact_name:
+        description: "GitHub Actions artifact name for the Solution Checker report"
+        value: ${{ jobs.build.outputs.checker_artifact_name }}
+
+jobs:
+  build:
+    name: "Build | ${{ inputs.solution_name }}"
+    runs-on: ubuntu-latest
+    outputs:
+      solution_version:      ${{ steps.stamp-version.outputs.version }}
+      artifact_name:         ${{ steps.set-names.outputs.artifact_name }}
+      unmanaged_zip:         ${{ steps.set-names.outputs.unmanaged_zip }}
+      managed_zip:           ${{ steps.set-names.outputs.managed_zip }}
+      checker_artifact_name: ${{ steps.set-names.outputs.checker_artifact_name }}
+
+    steps:
+      # ── 1a. Checkout calling repository (solution source) ─────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 1b. Checkout GHA-Core (this repo) for shared scripts ──────────────
+      - name: Checkout GHA-Core CI scripts
+        uses: actions/checkout@v4
+        with:
+          repository: YOUR_ORG/GHA-Core
+          ref: main
+          path: .ci
+          token: ${{ secrets.GHA_CORE_PAT }}
+
+      # ── 2. Validate mandatory inputs ───────────────────────────────────────
+      # Performs ALL checks before failing so every problem is surfaced at once.
+      # Validates: solution source folder & Solution.xml, version strategy,
+      # checker geo & error-level, data schema file, URL formats, and secrets
+      # (APP_ID / CLIENT_SECRET / TENANT_ID / JFROG_API_KEY).
+      #
+      # JFrog upload is always enabled — enable_jfrog_upload / jfrog_url are
+      # NOT validated here; they are pipeline-level constants.
+      - name: Validate mandatory inputs
+        shell: pwsh
+        run: |
+          $mock     = [System.Convert]::ToBoolean('${{ inputs.mock_deploy }}')
+          $errors   = [System.Collections.Generic.List[string]]::new()
+          $warnings = [System.Collections.Generic.List[string]]::new()
+
+          # ── solution_name ──────────────────────────────────────────────────
+          if (-not '${{ inputs.solution_name }}'.Trim()) {
+            $errors.Add("solution_name is required and must not be empty.")
+          }
+
+          # ── solution_source_folder + Solution.xml ─────────────────────────
+          $srcFolder = '${{ inputs.solution_source_folder }}'.Trim()
+          if (-not $srcFolder) {
+            $errors.Add("solution_source_folder is required.")
+          } else {
+            if (-not (Test-Path $srcFolder)) {
+              $errors.Add("solution_source_folder '$srcFolder' does not exist in the repository.")
+            } else {
+              $solutionXml = Join-Path $srcFolder 'Other/Solution.xml'
+              if (-not (Test-Path $solutionXml)) {
+                $errors.Add("Solution.xml not found at '$solutionXml'. Verify this is a valid unpacked solution folder (expected: $srcFolder/Other/Solution.xml).")
+              }
+            }
+          }
+
+          # ── build_version_strategy ────────────────────────────────────────
+          $validStrategies = @('run_number', 'gittags')
+          $strategy = '${{ inputs.build_version_strategy }}'
+          if ($strategy -notin $validStrategies) {
+            $errors.Add("build_version_strategy '$strategy' is invalid. Accepted values: $($validStrategies -join ', ').")
+          }
+
+          # ── checker_geo ───────────────────────────────────────────────────
+          $validGeos = @(
+            'UnitedStates','Europe','Asia','Australia','Japan','India','Canada',
+            'SouthAmerica','UnitedKingdom','France','Germany','UnitedArabEmirates',
+            'Switzerland','Korea','Norway','SouthAfrica','Qatar'
+          )
+          $geo = '${{ inputs.checker_geo }}'
+          if ($geo -notin $validGeos) {
+            $errors.Add("checker_geo '$geo' is not a valid geography. Valid values: $($validGeos -join ', ').")
+          }
+
+          # ── checker_error_level ───────────────────────────────────────────
+          $validLevels = @('CriticalIssue','HighIssue','MediumIssue','LowIssue','InformationalIssue')
+          $level = '${{ inputs.checker_error_level }}'
+          if ($level -notin $validLevels) {
+            $errors.Add("checker_error_level '$level' is invalid. Valid values: $($validLevels -join ', ').")
+          }
+
+          # ── data_schema_file (if provided) ────────────────────────────────
+          $schema = '${{ inputs.data_schema_file }}'.Trim()
+          if ($schema) {
+            if (-not (Test-Path $schema)) {
+              $errors.Add("data_schema_file '$schema' does not exist in the repository.")
+            }
+            if (-not '${{ inputs.source_environment_url }}'.Trim()) {
+              $errors.Add("source_environment_url is required when data_schema_file is provided (needed for config data export).")
+            }
+          }
+
+          # ── source_environment_url format (if provided) ───────────────────
+          $srcUrl = '${{ inputs.source_environment_url }}'.Trim()
+          if ($srcUrl -and $srcUrl -notmatch '^https://[a-zA-Z0-9][a-zA-Z0-9\-]*\.crm[0-9]*\.dynamics\.com/?$') {
+            $warnings.Add("source_environment_url '$srcUrl' does not match the expected Dataverse URL pattern (https://<org>.crm[N].dynamics.com). Verify it is correct.")
+          }
+
+          if (-not $mock) {
+            # ── Secrets (only checked in real builds — unavailable in mock) ──
+            if (-not '${{ secrets.APP_ID }}') {
+              $errors.Add("Secret APP_ID is not configured. Go to Settings → Secrets and add APP_ID.")
+            }
+            if (-not '${{ secrets.CLIENT_SECRET }}') {
+              $errors.Add("Secret CLIENT_SECRET is not configured. Go to Settings → Secrets and add CLIENT_SECRET.")
+            }
+            if (-not '${{ secrets.TENANT_ID }}') {
+              $errors.Add("Secret TENANT_ID is not configured. Go to Settings → Secrets and add TENANT_ID.")
+            }
+            if (-not '${{ secrets.JFROG_API_KEY }}') {
+              $errors.Add("Secret JFROG_API_KEY is not configured. Go to Settings → Secrets and add JFROG_API_KEY.")
+            }
+          }
+
+          # ── Report all findings ───────────────────────────────────────────
+          foreach ($w in $warnings) { Write-Host "::warning::$w" }
+          foreach ($e in $errors)   { Write-Host "::error::$e"   }
+
+          if ($errors.Count -gt 0) {
+            Write-Host ""
+            Write-Host "::error::Validation failed — $($errors.Count) error(s) found above. Fix all issues before re-running."
+
+            # Write failure summary
+            @"
+          ## ❌ Build Validation Failed — $($errors.Count) Error(s)
+          | # | Error |
+          | --- | --- |
+          $(($errors | ForEach-Object -Begin { $i=0 } -Process { $i++; "| $i | $_ |" }) -join "`n")
+
+          $(if ($warnings.Count -gt 0) {
+          @"
+          ### ⚠️ Warnings ($($warnings.Count))
+          $(($warnings | ForEach-Object { "- $_" }) -join "`n")
+          "@
+          })
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+            exit 1
+          }
+
+          $status = "✅ All checks passed"
+          if ($warnings.Count -gt 0) { $status += " ($($warnings.Count) warning(s))" }
+          Write-Host "$status — mock=$mock  jfrog=$jfrog  solution='${{ inputs.solution_name }}'"
+
+      # ── 3. Install PAC CLI (skipped in mock mode) ──────────────────────────
+      - name: Install PAC CLI
+        if: inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/actions-install@v1
+        with:
+          add-tools-to-path: true
+
+      # ── 4. Stamp solution version ──────────────────────────────────────────
+      - name: Stamp solution version
+        id: stamp-version
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/Set-SolutionVersion.ps1 `
+            -SolutionXmlPath '${{ inputs.solution_source_folder }}/Other/Solution.xml' `
+            -VersionStrategy '${{ inputs.build_version_strategy }}' `
+            -RunNumber       '${{ github.run_number }}'
+
+      # ── 5. Set artifact and ZIP names ──────────────────────────────────────
+      - name: Set artifact and ZIP names
+        id: set-names
+        shell: pwsh
+        run: |
+          $sol     = '${{ inputs.solution_name }}'
+          $ver     = '${{ steps.stamp-version.outputs.version }}'
+          $outDir  = "out/$sol"
+          $unman   = "$outDir/${sol}-${ver}_unmanaged.zip"
+          $man     = "$outDir/${sol}-${ver}_managed.zip"
+          $artName     = "solution-${sol}-${{ github.run_number }}"
+          $checkerName = "SolutionChecker-${sol}-${{ github.run_number }}"
+
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          New-Item -ItemType Directory -Path "$outDir/solution-checker" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$outDir/config" -Force | Out-Null
+
+          "artifact_name=$artName"              | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "unmanaged_zip=$unman"                | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "managed_zip=$man"                    | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "out_dir=$outDir"                     | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "checker_artifact_name=$checkerName"  | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          Write-Host "Artifact        : $artName"
+          Write-Host "Checker artifact: $checkerName"
+          Write-Host "Unmanaged       : $unman"
+          Write-Host "Managed         : $man"
+
+      # ── 6. Strip <Managed> tag from Solution.xml ──────────────────────────
+      - name: Strip Managed tag
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/Remove-ManagedTag.ps1 `
+            -SolutionXmlPath '${{ inputs.solution_source_folder }}/Other/Solution.xml'
+
+      # ── 7a. Pack Unmanaged — REAL (PAC CLI) ────────────────────────────────
+      # process-canvas-apps omitted: deprecated in PAC CLI 1.40+ and causes
+      # null reference on solutions without canvas apps.
+      - name: Pack Unmanaged solution
+        if: inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/pack-solution@v1
+        with:
+          solution-folder: "${{ inputs.solution_source_folder }}"
+          solution-file:   "${{ steps.set-names.outputs.unmanaged_zip }}"
+          solution-type:   "Unmanaged"
+
+      # ── 7b. Pack Unmanaged — SIMULATION (mock_deploy) ─────────────────────
+      - name: "🧪 Pack Unmanaged — Simulation (mock_deploy)"
+        if: inputs.mock_deploy == true
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/New-MockSolutionZip.ps1 `
+            -SolutionFolder '${{ inputs.solution_source_folder }}' `
+            -OutputZipPath  '${{ steps.set-names.outputs.unmanaged_zip }}' `
+            -PackageType    'Unmanaged'
+
+      # ── 8a. Pack Managed — REAL (PAC CLI) ──────────────────────────────────
+      - name: Pack Managed solution
+        if: inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/pack-solution@v1
+        with:
+          solution-folder: "${{ inputs.solution_source_folder }}"
+          solution-file:   "${{ steps.set-names.outputs.managed_zip }}"
+          solution-type:   "Managed"
+
+      # ── 8b. Pack Managed — SIMULATION (mock_deploy) ───────────────────────
+      - name: "🧪 Pack Managed — Simulation (mock_deploy)"
+        if: inputs.mock_deploy == true
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/New-MockSolutionZip.ps1 `
+            -SolutionFolder '${{ inputs.solution_source_folder }}' `
+            -OutputZipPath  '${{ steps.set-names.outputs.managed_zip }}' `
+            -PackageType    'Managed'
+
+      # ── 9a. Solution Checker — REAL ────────────────────────────────────────
+      # Always runs in non-mock builds — there is no toggle.
+      - name: Run Solution Checker
+        id: solution-checker-real
+        if: inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/check-solution@v1
+        with:
+          app-id:                    ${{ secrets.APP_ID }}
+          client-secret:             ${{ secrets.CLIENT_SECRET }}
+          tenant-id:                 ${{ secrets.TENANT_ID }}
+          path:                      "${{ steps.set-names.outputs.unmanaged_zip }}"
+          geo:                       ${{ inputs.checker_geo }}
+          fail-on-analysis-error:    true
+          error-level:               ${{ inputs.checker_error_level }}
+          checker-logs-artifact-name: "${{ steps.set-names.outputs.checker_artifact_name }}"
+
+      # ── 9a-post. Copy checker report into solution output folder ────────────
+      # The check-solution action writes SARIF/JSON results to a temp working
+      # directory before uploading them. We glob for any .sarif/.json files the
+      # action left behind and copy them into out/{solution}/solution-checker/
+      # so they are included in the main build artifact.
+      - name: Copy checker report to output folder
+        if: inputs.mock_deploy != true && steps.solution-checker-real.outcome != 'skipped'
+        shell: pwsh
+        run: |
+          $destDir = "out/${{ inputs.solution_name }}/solution-checker"
+          New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+
+          # The action writes results under the runner temp or working directory.
+          # Search common locations for SARIF / JSON checker output files.
+          $searchRoots = @(
+            $env:RUNNER_TEMP,
+            "${{ github.workspace }}",
+            "."
+          )
+          $found = @()
+          foreach ($root in $searchRoots) {
+            if ($root -and (Test-Path $root)) {
+              $files = Get-ChildItem -Path $root -Recurse -Include "*.sarif","*.sarif.json" `
+                         -ErrorAction SilentlyContinue |
+                       Where-Object { $_.FullName -notlike "*$destDir*" }
+              $found += $files
+            }
+          }
+
+          if ($found.Count -gt 0) {
+            foreach ($f in $found) {
+              Copy-Item -Path $f.FullName -Destination $destDir -Force
+              Write-Host "✅ Copied checker report: $($f.Name) → $destDir/"
+            }
+            "| ✅ Checker report | $($found.Count) file(s) copied to ``$destDir/`` |" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          } else {
+            # No SARIF found — write a placeholder so the folder is non-empty
+            # and the artifact upload doesn't skip it.
+            $placeholder = "$destDir/checker-summary.txt"
+            @"
+          Solution Checker completed — no SARIF output file located on runner.
+          Review the '${{ steps.set-names.outputs.checker_artifact_name }}' artifact
+          uploaded by the check-solution action for the full report.
+          Run  : ${{ github.run_number }}
+          Run attempt: ${{ github.run_attempt }}
+          "@ | Set-Content -Path $placeholder -Encoding UTF8
+            Write-Host "::notice::No SARIF file found — placeholder written to $placeholder"
+            "| ⚠️ Checker report | No SARIF located on runner — see artifact ``${{ steps.set-names.outputs.checker_artifact_name }}`` |" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+
+      # ── 9b. Solution Checker — SIMULATION (mock_deploy) ───────────────────
+      - name: "🧪 Solution Checker — Simulation (mock_deploy)"
+        id: solution-checker-sim
+        if: inputs.mock_deploy == true
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/Invoke-SolutionCheckerSim.ps1 `
+            -SolutionName  '${{ inputs.solution_name }}' `
+            -UnmanagedZip  '${{ steps.set-names.outputs.unmanaged_zip }}' `
+            -ManagedZip    '${{ steps.set-names.outputs.managed_zip }}' `
+            -CheckerGeo    '${{ inputs.checker_geo }}' `
+            -ErrorLevel    '${{ inputs.checker_error_level }}'
+
+      # ── 10a. Export config data — REAL ─────────────────────────────────────
+      - name: Export configuration data
+        id: export-data-real
+        if: inputs.data_schema_file != '' && inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/export-data@v1
+        with:
+          environment-url: ${{ inputs.source_environment_url }}
+          app-id:          ${{ secrets.APP_ID }}
+          client-secret:   ${{ secrets.CLIENT_SECRET }}
+          tenant-id:       ${{ secrets.TENANT_ID }}
+          schema-file:     ${{ inputs.data_schema_file }}
+          data-file:       "out/${{ inputs.solution_name }}/config/config-data.zip"
+          overwrite:       true
+
+      # ── 10b. Export config data — SIMULATION (mock_deploy) ─────────────────
+      - name: "🧪 Export configuration data — Simulation (mock_deploy)"
+        id: export-data-sim
+        if: inputs.data_schema_file != '' && inputs.mock_deploy == true
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/Export-ConfigDataSim.ps1 `
+            -SchemaFile           '${{ inputs.data_schema_file }}' `
+            -OutputZipPath        "out/${{ inputs.solution_name }}/config/config-data.zip" `
+            -SourceEnvironmentUrl '${{ inputs.source_environment_url }}' `
+            -RunNumber            '${{ github.run_number }}'
+
+      # ── 11. Upload GitHub Actions artifact ─────────────────────────────────
+      - name: Upload solution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.set-names.outputs.artifact_name }}
+          path: out/${{ inputs.solution_name }}/
+          retention-days: 30
+          if-no-files-found: warn
+
+
+      # ── 12a. Upload to JFrog Artifactory — REAL ─────────────────────────────
+      # Uploads the complete package AFTER Solution Checker passes.
+      # Package includes: managed ZIP, unmanaged ZIP, checker report, config data.
+      # Path: {jfrog_repo}/{repo_name}/{solution_name}/{run_number}/{run_attempt}/
+      - name: Upload package to JFrog Artifactory
+        id: jfrog-upload-real
+        if: inputs.enable_jfrog_upload == true && inputs.mock_deploy != true
+        shell: pwsh
+        env:
+          JFROG_API_KEY: ${{ secrets.JFROG_API_KEY }}
+        run: |
+          & .ci/.github/scripts/Invoke-JFrogAction.ps1 `
+            -Action       'upload' `
+            -JFrogUrl     '${{ inputs.jfrog_url }}' `
+            -JFrogRepo    '${{ inputs.jfrog_repo }}' `
+            -ApiKey       $env:JFROG_API_KEY `
+            -SolutionName '${{ inputs.solution_name }}' `
+            -RepoName     '${{ github.event.repository.name }}' `
+            -RunNumber    '${{ github.run_number }}' `
+            -RunAttempt   '${{ github.run_attempt }}' `
+            -LocalPath    'out/${{ inputs.solution_name }}' `
+            -MockDeploy   $false
+
+      # ── 12b. JFrog upload — SIMULATION (mock_deploy) ──────────────────────
+      - name: "🧪 JFrog Artifactory upload — Simulation (mock_deploy)"
+        id: jfrog-upload-sim
+        if: inputs.enable_jfrog_upload == true && inputs.mock_deploy == true
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/Invoke-JFrogAction.ps1 `
+            -Action       'upload' `
+            -JFrogUrl     '${{ inputs.jfrog_url || 'https://your-company.jfrog.io/artifactory' }}' `
+            -JFrogRepo    '${{ inputs.jfrog_repo }}' `
+            -ApiKey       'mock-key' `
+            -SolutionName '${{ inputs.solution_name }}' `
+            -RepoName     '${{ github.event.repository.name }}' `
+            -RunNumber    '${{ github.run_number }}' `
+            -RunAttempt   '${{ github.run_attempt }}' `
+            -LocalPath    'out/${{ inputs.solution_name }}' `
+            -MockDeploy   $true
+
+      # ── 14. Build summary + job summary record ────────────────────────────
+      - name: Build summary
+        if: always()
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/Write-BuildSummary.ps1 `
+            -SolutionName      '${{ inputs.solution_name }}' `
+            -SolutionVersion   '${{ steps.stamp-version.outputs.version }}' `
+            -ArtifactName      '${{ steps.set-names.outputs.artifact_name }}' `
+            -RunNumber         '${{ github.run_number }}' `
+            -MockDeploy        ([System.Convert]::ToBoolean('${{ inputs.mock_deploy }}')) `
+            -CheckerGeo        '${{ inputs.checker_geo }}' `
+            -DataSchemaFile    '${{ inputs.data_schema_file }}' `
+            -EnableJFrogUpload ([System.Convert]::ToBoolean('${{ inputs.enable_jfrog_upload }}')) `
+            -JFrogUrl          '${{ inputs.jfrog_url }}' `
+            -JFrogRepo         '${{ inputs.jfrog_repo }}' `
+            -JsonOutputPath    'job-summaries/build-${{ inputs.solution_name }}.json'
+
+      # ── 15. Upload job summary record ──────────────────────────────────────
+      - name: Upload job summary record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "job-summary-build-${{ inputs.solution_name }}-${{ github.run_number }}"
+          path: job-summaries/
+          retention-days: 7
+          if-no-files-found: warn
