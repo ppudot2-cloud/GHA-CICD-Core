@@ -516,12 +516,13 @@ jobs:
           $unman   = "$outDir/${sol}-${ver}_unmanaged.zip"
           $man     = "$outDir/${sol}-${ver}_managed.zip"
 
-          # Artifact name: base on first attempt, append attempt number on re-runs
-          # e.g. solution-MySol-v1.2.3.4-run42   (attempt 1)
-          #      solution-MySol-v1.2.3.4-run42-a2 (re-run)
+          # Artifact name: version-independent so deploy jobs can reconstruct it
+          # from solution name + run number alone (version lives inside the ZIPs).
+          # e.g. solution-MySol-run42    (attempt 1)
+          #      solution-MySol-run42-a2 (re-run)
           $artSuffix   = if ($attempt -eq '1') { "run${run}" } else { "run${run}-a${attempt}" }
-          $artName     = "solution-${sol}-v${ver}-${artSuffix}"
-          $checkerName = "SolutionChecker-${sol}-v${ver}-${artSuffix}"
+          $artName     = "solution-${sol}-${artSuffix}"
+          $checkerName = "SolutionChecker-${sol}-${artSuffix}"
 
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
           New-Item -ItemType Directory -Path "$outDir/solution-checker" -Force | Out-Null
