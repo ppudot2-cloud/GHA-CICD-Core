@@ -151,7 +151,7 @@ jobs:
       - name: Checkout GHA-Core CI scripts
         uses: actions/checkout@v4
         with:
-          repository: YOUR_ORG/GHA-Core
+          repository: ppudot2-cloud/GHA-Core
           ref: main
           path: .ci
           token: ${{ secrets.GHA_CORE_PAT }}

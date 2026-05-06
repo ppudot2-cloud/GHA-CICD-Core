@@ -202,7 +202,7 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
       fail-fast: false
-    uses: YOUR_ORG/GHA-Core/.github/workflows/_reusable-build.yml@main
+    uses: ppudot2-cloud/GHA-Core/.github/workflows/_reusable-build.yml@main
     with:
       solution_name:          ${{ matrix.solution }}
       solution_source_folder: src/solutions/${{ matrix.solution }}
@@ -227,7 +227,7 @@ jobs:
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
       max-parallel: 1
       fail-fast: false
-    uses: YOUR_ORG/GHA-Core/.github/workflows/_reusable-deploy.yml@main
+    uses: ppudot2-cloud/GHA-Core/.github/workflows/_reusable-deploy.yml@main
     with:
       environment_name:                   Dev
       environment_url:                    ${{ inputs.pp-dev-url }}
