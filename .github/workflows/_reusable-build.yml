@@ -455,16 +455,16 @@ jobs:
             Write-Host "::error::Pre-flight validation failed — $($errors.Count) error(s) above. Fix all issues and re-run."
 
             @"
-## ❌ Pre-flight Validation Failed — $($errors.Count) Error(s)
+            ## ❌ Pre-flight Validation Failed — $($errors.Count) Error(s)
 
-| # | Error |
-| --- | --- |
-$(($errors | ForEach-Object -Begin { $i=0 } -Process { $i++; "| $i | $_ |" }) -join "`n")
+            | # | Error |
+            | --- | --- |
+            $(($errors | ForEach-Object -Begin { $i=0 } -Process { $i++; "| $i | $_ |" }) -join "`n")
 
-$(if ($warnings.Count -gt 0) {
-  "### ⚠️ Warnings ($($warnings.Count))`n" + (($warnings | ForEach-Object { "- $_" }) -join "`n")
-})
-"@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+            $(if ($warnings.Count -gt 0) {
+              "### ⚠️ Warnings ($($warnings.Count))`n" + (($warnings | ForEach-Object { "- $_" }) -join "`n")
+            })
+            "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
             exit 1
           }
 
