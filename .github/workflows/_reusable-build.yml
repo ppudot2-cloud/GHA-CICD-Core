@@ -191,12 +191,13 @@ jobs:
         shell: pwsh
         run: |
           $kvName  = '${{ vars.AZURE_KEY_VAULT_NAME }}'
+          $jfrogEnabled = '${{ inputs.jfrog_url }}' -ne ''
           $secrets = [ordered]@{
             'pp-app-id'        = 'PP_APP_ID'
             'pp-client-secret' = 'PP_CLIENT_SECRET'
             'pp-tenant-id'     = 'PP_TENANT_ID'
-            'jfrog-api-key'    = 'JFROG_API_KEY'
           }
+          if ($jfrogEnabled) { $secrets['jfrog-api-key'] = 'JFROG_API_KEY' }
           foreach ($entry in $secrets.GetEnumerator()) {
             $value = az keyvault secret show `
               --vault-name $kvName `
@@ -330,7 +331,7 @@ jobs:
           $jfrogUrlOk = $false
 
           if (-not $jfrogUrl) {
-            Fail "jfrog_url is required. Set the JFROG_URL repository variable and pass it to this workflow."
+            Skip "JFrog upload disabled — jfrog_url not set"
           } elseif ($jfrogUrl -notmatch '^https://') {
             Fail "jfrog_url '$jfrogUrl' must start with https://."
           } else {
@@ -338,10 +339,14 @@ jobs:
             $jfrogUrlOk = $true
           }
 
-          if ($jfrogRepo) { Pass "jfrog_repo = '$jfrogRepo'" }
+          if (-not $jfrogUrl) {
+            Skip "jfrog_repo check — skipped (JFrog disabled)"
+          } elseif ($jfrogRepo) { Pass "jfrog_repo = '$jfrogRepo'" }
           else { Fail "jfrog_repo is required and must not be empty." }
 
-          if ($mock) {
+          if (-not $jfrogUrl) {
+            Skip "JFrog live connectivity check — skipped (JFrog disabled)"
+          } elseif ($mock) {
             Skip "JFrog live connectivity check — skipped in mock_deploy mode"
           } elseif ($jfrogUrlOk) {
             Write-Host "  🔌 Pinging $jfrogUrl/api/system/ping ..."
@@ -429,7 +434,10 @@ jobs:
               Warn "PP_TENANT_ID does not look like a GUID — verify AKV secret 'pp-tenant-id' contains the tenant ID."
             }
 
-            if ($jfrogApiKey) { Pass "JFROG_API_KEY fetched from AKV (non-empty)" }
+            $jfrogEnabled = '${{ inputs.jfrog_url }}' -ne ''
+            if (-not $jfrogEnabled) {
+              Skip "JFROG_API_KEY check — skipped (JFrog disabled)"
+            } elseif ($jfrogApiKey) { Pass "JFROG_API_KEY fetched from AKV (non-empty)" }
             else { Fail "JFROG_API_KEY is empty — AKV secret 'jfrog-api-key' was not fetched. Check Key Vault access." }
           }
 
@@ -701,7 +709,7 @@ jobs:
       # Path: {jfrog_repo}/{repo_name}/{solution_name}/{run_number}/{run_attempt}/
       - name: Upload package to JFrog Artifactory
         id: jfrog-upload-real
-        if: inputs.mock_deploy != true
+        if: inputs.mock_deploy != true && inputs.jfrog_url != ''
         shell: pwsh
         env:
           JFROG_API_KEY: ${{ env.JFROG_API_KEY }}
@@ -721,7 +729,7 @@ jobs:
       # ── 12b. JFrog upload — SIMULATION (mock_deploy) ──────────────────────
       - name: "🧪 JFrog Artifactory upload — Simulation (mock_deploy)"
         id: jfrog-upload-sim
-        if: inputs.mock_deploy == true
+        if: inputs.mock_deploy == true && inputs.jfrog_url != ''
         shell: pwsh
         run: |
           & .ci/.github/scripts/Invoke-JFrogAction.ps1 `
@@ -749,7 +757,7 @@ jobs:
             -MockDeploy        ([System.Convert]::ToBoolean('${{ inputs.mock_deploy }}')) `
             -CheckerGeo        '${{ inputs.checker_geo }}' `
             -DataSchemaFile    '${{ inputs.data_schema_file }}' `
-            -EnableJFrogUpload $true `  # Always mandatory
+            -EnableJFrogUpload ([System.Convert]::ToBoolean('${{ inputs.jfrog_url != '' }}')) `
             -JFrogUrl          '${{ inputs.jfrog_url }}' `
             -JFrogRepo         '${{ inputs.jfrog_repo }}' `
             -JsonOutputPath    'job-summaries/build-${{ inputs.solution_name }}.json'
