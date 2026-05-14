@@ -1,0 +1,212 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# _job-build.yml  —  Reusable BUILD job
+#
+# Orchestrates composite actions in templates/steps/dynamics/:
+#   1. ci-bootstrap       – checkout, Azure login, AKV secrets, merge vars
+#   2. pac-install        – install PAC CLI
+#   3. (optional) download-artifact – fetch exported source from _stage-export
+#   4. pack-solution      – version bump, pack unmanaged + managed ZIPs
+#   5. solution-checker   – run Solution Checker / SARIF
+#   6. export-config-data – export config migration data (if schema supplied)
+#   7. jfrog-upload       – upload artifacts to JFrog Artifactory
+#
+# Two source modes (controlled by use_exported_source):
+#   false (default) – pack from committed src/solutions/ tree (release-pipeline)
+#   true            – download exported-source-<name> artifact from _stage-export,
+#                     then pack from it (combined-pipeline after export stage)
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  workflow_call:
+    inputs:
+      solution_name:
+        description: 'Name of the Power Platform solution'
+        required: true
+        type: string
+      solution_source_folder:
+        description: 'Relative path to the solution source folder (used when use_exported_source=false)'
+        required: false
+        type: string
+        default: 'src/solutions'
+      use_exported_source:
+        description: >
+          When true, download the exported-source-<solution_name> artifact produced
+          by _stage-export and use it as the source for packing.
+          When false (default), pack from the committed solution_source_folder.
+        required: false
+        type: boolean
+        default: false
+      checker_geo:
+        description: 'Solution Checker geography (e.g. UnitedStates)'
+        required: false
+        type: string
+        default: 'UnitedStates'
+      checker_error_level:
+        description: 'Solution Checker error threshold (CriticalIssueCount | HighIssueCount)'
+        required: false
+        type: string
+        default: 'CriticalIssueCount'
+      data_schema_file:
+        description: 'Path to config-data schema XML (empty = skip export)'
+        required: false
+        type: string
+        default: ''
+      source_environment_url:
+        description: 'Power Platform sandbox URL for config-data export'
+        required: false
+        type: string
+        default: ''
+      mock_deploy:
+        description: 'Simulate the full pipeline without Dataverse/JFrog changes'
+        required: false
+        type: boolean
+        default: false
+      jfrog_url:
+        description: 'JFrog Artifactory base URL'
+        required: false
+        type: string
+        default: ''
+      jfrog_repo:
+        description: 'JFrog repository name'
+        required: false
+        type: string
+        default: 'power-platform'
+    outputs:
+      solution_version:
+        description: 'Computed solution version (e.g. 1.0.20240101.1)'
+        value: ${{ jobs.build.outputs.solution_version }}
+      artifact_name:
+        description: 'Full artifact identifier'
+        value: ${{ jobs.build.outputs.artifact_name }}
+      unmanaged_zip:
+        description: 'Path to unmanaged solution zip'
+        value: ${{ jobs.build.outputs.unmanaged_zip }}
+      managed_zip:
+        description: 'Path to managed solution zip'
+        value: ${{ jobs.build.outputs.managed_zip }}
+      checker_artifact_name:
+        description: 'Artifact name for Solution Checker SARIF'
+        value: ${{ jobs.build.outputs.checker_artifact_name }}
+
+jobs:
+  build:
+    name: Build — ${{ inputs.solution_name }}
+    runs-on: ubuntu-latest
+    outputs:
+      solution_version:      ${{ steps.pack.outputs.version }}
+      artifact_name:         ${{ steps.pack.outputs.artifact_name }}
+      unmanaged_zip:         ${{ steps.pack.outputs.unmanaged_zip }}
+      managed_zip:           ${{ steps.pack.outputs.managed_zip }}
+      checker_artifact_name: ${{ steps.pack.outputs.checker_artifact_name }}
+
+    env:
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+
+    steps:
+      # ── 1. Bootstrap ──────────────────────────────────────────────────────────
+      - name: CI Bootstrap
+        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/ci-bootstrap@main
+        with:
+          mock_deploy:   ${{ inputs.mock_deploy }}
+          jfrog_enabled: ${{ inputs.jfrog_url != '' }}
+
+      # ── 2. Install PAC CLI ────────────────────────────────────────────────────
+      - name: Install PAC CLI
+        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/pac-install@main
+
+      # ── 3. Download exported source (combined-pipeline mode only) ─────────────
+      # _stage-export uploaded exported-source-<name> as a GitHub artifact.
+      # Download it to export-src/<solution_name>/ so pack-solution can consume it.
+      - name: Download exported source artifact
+        if: ${{ inputs.use_exported_source == true }}
+        uses: actions/download-artifact@v4
+        with:
+          name: exported-source-${{ inputs.solution_name }}
+          path: export-src/${{ inputs.solution_name }}/
+
+      # Resolve the effective source folder depending on mode
+      - name: Resolve source folder
+        id: src
+        shell: bash
+        run: |
+          if [ "${{ inputs.use_exported_source }}" = "true" ]; then
+            echo "folder=export-src" >> "$GITHUB_OUTPUT"
+          else
+            echo "folder=${{ inputs.solution_source_folder }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 4. Pack solution ──────────────────────────────────────────────────────
+      - name: Pack Solution
+        id: pack
+        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/pack-solution@main
+        with:
+          solution_name:          ${{ inputs.solution_name }}
+          solution_source_folder: ${{ steps.src.outputs.folder }}
+          mock_deploy:            ${{ inputs.mock_deploy }}
+          run_number:             ${{ github.run_number }}
+          run_attempt:            ${{ github.run_attempt }}
+
+      # ── 5. Solution Checker ───────────────────────────────────────────────────
+      - name: Solution Checker
+        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/solution-checker@main
+        with:
+          solution_name:         ${{ inputs.solution_name }}
+          unmanaged_zip:         ${{ steps.pack.outputs.unmanaged_zip }}
+          managed_zip:           ${{ steps.pack.outputs.managed_zip }}
+          checker_geo:           ${{ inputs.checker_geo }}
+          checker_error_level:   ${{ inputs.checker_error_level }}
+          checker_artifact_name: ${{ steps.pack.outputs.checker_artifact_name }}
+          mock_deploy:           ${{ inputs.mock_deploy }}
+          out_dir:               ${{ steps.pack.outputs.out_dir }}
+
+      # ── 6. Export config data ─────────────────────────────────────────────────
+      - name: Export Config Data
+        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/export-config-data@main
+        with:
+          solution_name:          ${{ inputs.solution_name }}
+          data_schema_file:       ${{ inputs.data_schema_file }}
+          source_environment_url: ${{ inputs.source_environment_url }}
+          run_number:             ${{ github.run_number }}
+          mock_deploy:            ${{ inputs.mock_deploy }}
+
+      # ── 7. Upload artifact for deploy stages ─────────────────────────────────
+      # Deploy stages pull from GitHub artifact storage — not JFrog.
+      # JFrog (step 8) is for long-term archival only and runs once here.
+      # Retention: 7 days — long enough to cover multi-day approval chains.
+      - name: Upload solution artifact for deploy
+        uses: actions/upload-artifact@v4
+        with:
+          name: solution-artifact-${{ inputs.solution_name }}
+          path: |
+            ${{ steps.pack.outputs.out_dir }}/
+            config-data/${{ inputs.solution_name }}-data.zip
+          retention-days: 7
+          if-no-files-found: warn
+
+      # ── 8. JFrog Upload (archival — once per build) ───────────────────────────
+      # Long-term storage and prodDeployed tagging. Not used by deploy stages.
+      - name: JFrog Upload
+        if: ${{ inputs.jfrog_url != '' }}
+        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/jfrog-upload@main
+        with:
+          solution_name:         ${{ inputs.solution_name }}
+          artifact_name:         ${{ steps.pack.outputs.artifact_name }}
+          unmanaged_zip:         ${{ steps.pack.outputs.unmanaged_zip }}
+          managed_zip:           ${{ steps.pack.outputs.managed_zip }}
+          checker_artifact_name: ${{ steps.pack.outputs.checker_artifact_name }}
+          jfrog_url:             ${{ inputs.jfrog_url }}
+          jfrog_repo:            ${{ inputs.jfrog_repo }}
+          run_number:            ${{ github.run_number }}
+          run_attempt:           ${{ github.run_attempt }}
+          mock_deploy:           ${{ inputs.mock_deploy }}
+
+      # ── Build summary ─────────────────────────────────────────────────────────
+      - name: Write build summary
+        if: always()
+        shell: pwsh
+        run: |
+          .ci/templates/steps/dynamics/Write-BuildSummary.ps1 `
+            -SolutionName    "${{ inputs.solution_name }}" `
+            -SolutionVersion "${{ steps.pack.outputs.version }}" `
+            -ArtifactName    "${{ steps.pack.outputs.artifact_name }}" `
+            -SourceMode      "${{ inputs.use_exported_source == true && 'exported' || 'source-tree' }}" `
+            -MockDeploy:$${{ inputs.mock_deploy == true }}

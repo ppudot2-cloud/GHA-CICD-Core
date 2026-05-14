@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# _stage-export.yml  —  Reusable EXPORT STAGE
+#
+# Fans out per solution (parallel) and for each solution:
+#   1. ci-bootstrap   – checkout, Azure OIDC login, AKV secrets, merge vars
+#   2. pac-install    – install PAC CLI
+#   3. export-solution – export unmanaged ZIP from sandbox, unpack to source tree
+#   4. upload-artifact – upload unpacked source as exported-source-<name> artifact
+#
+# The build stage (_stage-build.yml) downloads these artifacts when
+# use_exported_source=true, so each runner gets the freshly-exported source.
+#
+# This stage is SKIPPED when:
+#   • combined-pipeline.yml skip_export=true
+#   • combined-pipeline.yml mock_deploy=true
+# The build stage handles both cases via use_exported_source=false (builds from
+# the committed src/solutions/ tree instead).
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        description: 'JSON array of solution objects from the setup job'
+        required: true
+        type: string
+      source_environment_url:
+        description: 'Power Platform sandbox URL to export solutions from'
+        required: true
+        type: string
+      mock_deploy:
+        description: 'Should always be false when this stage runs — guard kept for safety'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  export:
+    name: "📤 Export | ${{ matrix.solution.name }}"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        solution: ${{ fromJson(inputs.matrix) }}
+      fail-fast: false   # export failures are isolated per solution
+
+    env:
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+
+    steps:
+      # ── 1. Bootstrap ──────────────────────────────────────────────────────────
+      - name: CI Bootstrap
+        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/ci-bootstrap@main
+        with:
+          mock_deploy:   ${{ inputs.mock_deploy }}
+          jfrog_enabled: false
+
+      # ── 2. Install PAC CLI ────────────────────────────────────────────────────
+      - name: Install PAC CLI
+        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/pac-install@main
+
+      # ── 3. Export solution from sandbox ───────────────────────────────────────
+      - name: Export Solution
+        id: export
+        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/export-solution@main
+        with:
+          solution_name:          ${{ matrix.solution.name }}
+          source_environment_url: ${{ inputs.source_environment_url }}
+          export_folder:          export-src
+          mock_deploy:            ${{ inputs.mock_deploy }}
+
+      # ── 4. Upload unpacked source as artifact for build stage ─────────────────
+      - name: Upload exported source
+        uses: actions/upload-artifact@v4
+        with:
+          name: exported-source-${{ matrix.solution.name }}
+          # Upload the unpacked source tree so build stage can pack+version-stamp it
+          path: ${{ steps.export.outputs.source_folder }}/${{ matrix.solution.name }}/
+          retention-days: 1   # short-lived — only needed within the same pipeline run
+          if-no-files-found: error

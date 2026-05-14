@@ -1,0 +1,152 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# _stage-deploy-env.yml  —  Reusable DEPLOY STAGE (single environment)
+#
+# Contains two jobs:
+#
+#   gate    – lightweight job that carries the GitHub Environment approval gate.
+#             GitHub does not allow `environment:` on a job that also uses `uses:`,
+#             so gate is always a separate job.
+#
+#   deploy  – fans out _job-deploy across every solution sequentially.
+#             Uses job-level `uses:` + `strategy.matrix` + max-parallel:1.
+#             A job with `uses:` cannot also have `steps:`.
+#
+# Artifact naming convention (deterministic — no build-output lookup required):
+#   <SolutionName>_<run_number>_<run_attempt>
+# This matches what _job-build.yml stores in JFrog.
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  workflow_call:
+    inputs:
+      environment_name:
+        description: 'Target environment label (Dev, Intg, UAT, FRS, Perf, Prod)'
+        required: true
+        type: string
+      environment_url:
+        description: 'Target Power Platform environment URL'
+        required: true
+        type: string
+      matrix:
+        description: >
+          JSON array of solution objects (same shape as _stage-build inputs.matrix).
+          Each object may also carry a `deployment_settings_prefix` key
+          (e.g. "deployment-settings") so the deploy job can resolve
+          deployment-settings/<env>/<SolutionName>.json automatically.
+        required: true
+        type: string
+      solution_type:
+        description: 'Import type: Managed or Unmanaged'
+        required: false
+        type: string
+        default: 'Managed'
+      trigger_upgrade:
+        description: 'Use stage-and-upgrade (holding) pattern'
+        required: false
+        type: boolean
+        default: false
+      mock_deploy:
+        description: 'Simulate the pipeline without Dataverse changes'
+        required: false
+        type: boolean
+        default: false
+      enable_backup:
+        description: 'Export existing solution as backup before import'
+        required: false
+        type: boolean
+        default: true
+      enable_blocking_check:
+        description: 'Run blocking-check script before import'
+        required: false
+        type: boolean
+        default: true
+      enable_version_compare:
+        description: 'Skip import if same/higher version already installed'
+        required: false
+        type: boolean
+        default: true
+      previous_environment_url:
+        description: 'URL of the environment promoted from (for data export / compare)'
+        required: false
+        type: string
+        default: ''
+      base_solutions:
+        description: 'Comma-separated list of base solutions to verify are present'
+        required: false
+        type: string
+        default: ''
+      import_config_data:
+        description: 'Import configuration migration data after solution import'
+        required: false
+        type: boolean
+        default: false
+      jfrog_url:
+        description: 'JFrog Artifactory base URL'
+        required: false
+        type: string
+        default: ''
+      jfrog_repo:
+        description: 'JFrog repository name'
+        required: false
+        type: string
+        default: 'power-platform'
+      tag_prod_deployed:
+        description: 'Tag JFrog artifact with prodDeployed=true after success (Prod only)'
+        required: false
+        type: boolean
+        default: false
+      run_number:
+        description: 'GitHub run number (threaded from the caller so artifact name is consistent)'
+        required: true
+        type: string
+      run_attempt:
+        description: 'GitHub run attempt (threaded from the caller)'
+        required: true
+        type: string
+
+jobs:
+  # ── Approval gate ─────────────────────────────────────────────────────────────
+  gate:
+    name: Gate — ${{ inputs.environment_name }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+    steps:
+      - name: Gate passed
+        shell: bash
+        run: |
+          echo "✅ ${{ inputs.environment_name }} gate approved."
+          echo "Run #${{ inputs.run_number }} | Attempt ${{ inputs.run_attempt }}"
+
+  # ── Sequential deploy ─────────────────────────────────────────────────────────
+  # Job-level `uses:` + `strategy.matrix` + `max-parallel: 1`.
+  # Dataverse cannot process parallel solution imports.
+  deploy:
+    name: Deploy ${{ matrix.solution.name }} → ${{ inputs.environment_name }}
+    needs: gate
+    strategy:
+      matrix:
+        solution: ${{ fromJson(inputs.matrix) }}
+      max-parallel: 1
+      fail-fast: true
+    uses: ppudot2-cloud/GHA-Core/.github/workflows/dynamics/jobs/_job-deploy.yml@main
+    with:
+      environment_name:         ${{ inputs.environment_name }}
+      environment_url:          ${{ inputs.environment_url }}
+      solution_name:            ${{ matrix.solution.name }}
+      solution_type:            ${{ inputs.solution_type }}
+      # Deterministic artifact name — matches what _job-build.yml uploaded to JFrog
+      artifact_name:            ${{ matrix.solution.name }}_${{ inputs.run_number }}_${{ inputs.run_attempt }}
+      solution_version:         ''
+      trigger_upgrade:          ${{ inputs.trigger_upgrade }}
+      mock_deploy:              ${{ inputs.mock_deploy }}
+      enable_backup:            ${{ inputs.enable_backup }}
+      enable_blocking_check:    ${{ inputs.enable_blocking_check }}
+      enable_version_compare:   ${{ inputs.enable_version_compare }}
+      previous_environment_url: ${{ inputs.previous_environment_url }}
+      base_solutions:           ${{ inputs.base_solutions }}
+      import_config_data:       ${{ inputs.import_config_data }}
+      # Resolve deployment-settings/<env>/<SolutionName>.json automatically
+      deployment_settings_file: ${{ matrix.solution.deployment_settings_prefix || 'deployment-settings' }}/${{ inputs.environment_name }}/${{ matrix.solution.name }}.json
+      jfrog_url:                ${{ inputs.jfrog_url }}
+      jfrog_repo:               ${{ inputs.jfrog_repo }}
+      tag_prod_deployed:        ${{ inputs.tag_prod_deployed }}
+    secrets: inherit
