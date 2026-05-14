@@ -110,19 +110,19 @@ jobs:
     steps:
       # ── 1. Bootstrap ──────────────────────────────────────────────────────────
       - name: CI Bootstrap
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/ci-bootstrap@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/ci-bootstrap@main
         with:
           mock_deploy:   ${{ inputs.mock_deploy }}
           jfrog_enabled: ${{ inputs.jfrog_url != '' }}
 
       # ── 2. Install PAC CLI ────────────────────────────────────────────────────
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/pac-install@main
 
       # ── 3. Resolve settings & download artifact ───────────────────────────────
       - name: Resolve Deployment Settings
         id: resolve
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/resolve-settings@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/resolve-settings@main
         with:
           solution_name:            ${{ inputs.solution_name }}
           artifact_name:            ${{ inputs.artifact_name }}
@@ -137,7 +137,7 @@ jobs:
       # ── 4. Pre-deploy checks ──────────────────────────────────────────────────
       - name: Pre-Deploy Checks
         id: pre-check
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/pre-deploy-checks@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/pre-deploy-checks@main
         with:
           solution_name:          ${{ inputs.solution_name }}
           environment_url:        ${{ inputs.environment_url }}
@@ -149,7 +149,7 @@ jobs:
 
       # ── 5. Backup current solution ────────────────────────────────────────────
       - name: Backup Solution
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/backup-solution@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/backup-solution@main
         with:
           solution_name:    ${{ inputs.solution_name }}
           environment_url:  ${{ inputs.environment_url }}
@@ -159,7 +159,7 @@ jobs:
 
       # ── 6. Import solution ────────────────────────────────────────────────────
       - name: Import Solution
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/import-solution@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/import-solution@main
         with:
           solution_name:          ${{ inputs.solution_name }}
           managed_zip:            ${{ steps.resolve.outputs.managed_zip }}
@@ -176,7 +176,7 @@ jobs:
       # ── 7. Post-deploy ────────────────────────────────────────────────────────
       - name: Post-Deploy
         if: always()
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/post-deploy@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/post-deploy@main
         with:
           solution_name:     ${{ inputs.solution_name }}
           solution_version:  ${{ inputs.solution_version }}

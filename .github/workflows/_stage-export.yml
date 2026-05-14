@@ -48,19 +48,19 @@ jobs:
     steps:
       # ── 1. Bootstrap ──────────────────────────────────────────────────────────
       - name: CI Bootstrap
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/ci-bootstrap@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/ci-bootstrap@main
         with:
           mock_deploy:   ${{ inputs.mock_deploy }}
           jfrog_enabled: false
 
       # ── 2. Install PAC CLI ────────────────────────────────────────────────────
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/pac-install@main
 
       # ── 3. Export solution from sandbox ───────────────────────────────────────
       - name: Export Solution
         id: export
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/export-solution@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/export-solution@main
         with:
           solution_name:          ${{ matrix.solution.name }}
           source_environment_url: ${{ inputs.source_environment_url }}

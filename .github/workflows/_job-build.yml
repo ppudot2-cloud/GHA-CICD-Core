@@ -104,14 +104,14 @@ jobs:
     steps:
       # ── 1. Bootstrap ──────────────────────────────────────────────────────────
       - name: CI Bootstrap
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/ci-bootstrap@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/ci-bootstrap@main
         with:
           mock_deploy:   ${{ inputs.mock_deploy }}
           jfrog_enabled: ${{ inputs.jfrog_url != '' }}
 
       # ── 2. Install PAC CLI ────────────────────────────────────────────────────
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/pac-install@main
 
       # ── 3. Download exported source (combined-pipeline mode only) ─────────────
       # _stage-export uploaded exported-source-<name> as a GitHub artifact.
@@ -137,7 +137,7 @@ jobs:
       # ── 4. Pack solution ──────────────────────────────────────────────────────
       - name: Pack Solution
         id: pack
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/pack-solution@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/pack-solution@main
         with:
           solution_name:          ${{ inputs.solution_name }}
           solution_source_folder: ${{ steps.src.outputs.folder }}
@@ -147,7 +147,7 @@ jobs:
 
       # ── 5. Solution Checker ───────────────────────────────────────────────────
       - name: Solution Checker
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/solution-checker@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/solution-checker@main
         with:
           solution_name:         ${{ inputs.solution_name }}
           unmanaged_zip:         ${{ steps.pack.outputs.unmanaged_zip }}
@@ -160,7 +160,7 @@ jobs:
 
       # ── 6. Export config data ─────────────────────────────────────────────────
       - name: Export Config Data
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/export-config-data@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/export-config-data@main
         with:
           solution_name:          ${{ inputs.solution_name }}
           data_schema_file:       ${{ inputs.data_schema_file }}
@@ -186,7 +186,7 @@ jobs:
       # Long-term storage and prodDeployed tagging. Not used by deploy stages.
       - name: JFrog Upload
         if: ${{ inputs.jfrog_url != '' }}
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/jfrog-upload@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/jfrog-upload@main
         with:
           solution_name:         ${{ inputs.solution_name }}
           artifact_name:         ${{ steps.pack.outputs.artifact_name }}

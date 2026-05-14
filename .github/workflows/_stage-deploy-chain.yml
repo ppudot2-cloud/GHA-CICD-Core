@@ -207,14 +207,14 @@ jobs:
     steps:
       # ── 1. Bootstrap ──────────────────────────────────────────────────────────
       - name: CI Bootstrap
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/ci-bootstrap@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/ci-bootstrap@main
         with:
           mock_deploy:   ${{ inputs.mock_deploy }}
           jfrog_enabled: ${{ inputs.jfrog_url != '' }}
 
       # ── 2. Install PAC CLI ────────────────────────────────────────────────────
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/pac-install@main
 
       # ── 3. Download solution artifacts ────────────────────────────────────────
       # Phase 1: artifacts were uploaded by _stage-build in the current run.
@@ -235,7 +235,7 @@ jobs:
       # Per-env options come from matrix.env (assembled from named config inputs).
       # Common options come from workflow_call inputs.
       - name: "Deploy all solutions → ${{ matrix.env.name }}"
-        uses: ppudot2-cloud/GHA-Core/templates/steps/dynamics/deploy-all-solutions@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/deploy-all-solutions@main
         with:
           solutions_json:           ${{ inputs.matrix }}
           environment_name:         ${{ matrix.env.name }}
