@@ -152,7 +152,9 @@ runs:
         $envUrl      = $env:ENVIRONMENT_URL
         $envLower    = $envName.ToLower()
 
-        $solutions = $env:SOLUTIONS_JSON | ConvertFrom-Json
+        # SOLUTIONS_JSON is the matrix object {"solution":[...]} — extract the array
+        $parsed    = $env:SOLUTIONS_JSON | ConvertFrom-Json
+        $solutions = if ($parsed.solution) { $parsed.solution } else { $parsed }
         $failed    = [System.Collections.Generic.List[string]]::new()
 
         Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
