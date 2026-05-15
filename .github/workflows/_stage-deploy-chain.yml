@@ -209,8 +209,12 @@ jobs:
       - name: CI Bootstrap
         uses: ppudot2-cloud/GHA-Core/.github/actions/ci-bootstrap@main
         with:
-          mock_deploy:   ${{ inputs.mock_deploy }}
-          jfrog_enabled: ${{ inputs.jfrog_url != '' }}
+          mock_deploy:            ${{ inputs.mock_deploy }}
+          jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
+          azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
+          azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
+          azure_subscription_id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          azure_key_vault_name:   ${{ vars.AZURE_KEY_VAULT_NAME }}
 
       # ── 2. Install PAC CLI ────────────────────────────────────────────────────
       - name: Install PAC CLI

@@ -20,6 +20,22 @@ inputs:
     description: 'Also fetch jfrog-api-key from AKV (set true when jfrog_url is provided)'
     required: false
     default: 'false'
+  azure_client_id:
+    description: 'Azure service principal client ID (vars.AZURE_CLIENT_ID from the caller)'
+    required: false
+    default: ''
+  azure_tenant_id:
+    description: 'Azure tenant ID (vars.AZURE_TENANT_ID from the caller)'
+    required: false
+    default: ''
+  azure_subscription_id:
+    description: 'Azure subscription ID (vars.AZURE_SUBSCRIPTION_ID from the caller)'
+    required: false
+    default: ''
+  azure_key_vault_name:
+    description: 'Azure Key Vault name (vars.AZURE_KEY_VAULT_NAME from the caller)'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -41,15 +57,15 @@ runs:
       if: ${{ inputs.mock_deploy != 'true' }}
       uses: azure/login@v2
       with:
-        client-id:       ${{ vars.AZURE_CLIENT_ID }}
-        tenant-id:       ${{ vars.AZURE_TENANT_ID }}
-        subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        client-id:       ${{ inputs.azure_client_id }}
+        tenant-id:       ${{ inputs.azure_tenant_id }}
+        subscription-id: ${{ inputs.azure_subscription_id }}
 
     - name: Fetch secrets from Azure Key Vault
       if: ${{ inputs.mock_deploy != 'true' }}
       shell: pwsh
       run: |
-        $kvName       = '${{ vars.AZURE_KEY_VAULT_NAME }}'
+        $kvName       = '${{ inputs.azure_key_vault_name }}'
         $jfrogEnabled = '${{ inputs.jfrog_enabled }}' -eq 'true'
         $secrets = [ordered]@{
           'pp-app-id'        = 'PP_APP_ID'
