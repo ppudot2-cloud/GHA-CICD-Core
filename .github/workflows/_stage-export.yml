@@ -96,7 +96,7 @@ jobs:
   # mock_deploy only suppresses Power Platform imports, not git operations.
   # ─────────────────────────────────────────────────────────────────────────────
   commit:
-    name: "🌿 Commit to feature/pipeline-${{ github.run_number }}"
+    name: "📤 Commit → feature/pipeline-${{ github.run_number }}"
     needs: [export]
     runs-on: ubuntu-latest
     permissions:

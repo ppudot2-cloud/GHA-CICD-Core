@@ -178,7 +178,7 @@ jobs:
   # Fails non-mock runs if required secrets or environment URLs are missing.
   # ─────────────────────────────────────────────────────────────────────────────
   validate:
-    name: "🔎 Validate Pipeline Config"
+    name: "🏗️ Validate Pipeline Config"
     needs: [build]
     if: needs.build.result == 'success'
     runs-on: ubuntu-latest
