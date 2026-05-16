@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # _job-build.yml  —  Reusable BUILD job
 #
-# Orchestrates composite actions in templates/steps/dynamics/:
+# Orchestrates composite actions in .github/workflows/scripts/dynamics/:
 #   1. ci-bootstrap       – checkout, Azure login, AKV secrets, merge vars
 #   2. pac-install        – install PAC CLI
 #   3. (optional) download-artifact – fetch exported source from _stage-export
@@ -208,7 +208,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          & .ci/templates/steps/dynamics/Write-BuildSummary.ps1 `
+          & .ci/.github/workflows/scripts/dynamics/Write-BuildSummary.ps1 `
             -SolutionName    "${{ inputs.solution_name }}" `
             -SolutionVersion "${{ steps.pack.outputs.version }}" `
             -ArtifactName    "${{ steps.pack.outputs.artifact_name }}" `

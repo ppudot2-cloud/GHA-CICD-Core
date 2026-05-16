@@ -88,6 +88,6 @@ runs:
     - name: Merge global and project variables
       shell: pwsh
       run: |
-        pwsh .ci/templates/steps/dynamics/Merge-Variables.ps1 `
+        pwsh .ci/.github/workflows/scripts/dynamics/Merge-Variables.ps1 `
           -GlobalVarsPath  ".ci/templates/variables/dynamics/global-vars.yml" `
           -ProjectVarsPath ".github/config/project-vars.yml"

@@ -56,7 +56,7 @@ runs:
       if: ${{ inputs.enable_blocking_check == 'true' && inputs.mock_deploy != 'true' }}
       shell: pwsh
       run: |
-        $scriptPath = ".ci/templates/steps/dynamics/Invoke-BlockingCheck.ps1"
+        $scriptPath = ".ci/.github/workflows/scripts/dynamics/Invoke-BlockingCheck.ps1"
         & $scriptPath `
           -EnvironmentUrl  "${{ inputs.environment_url }}" `
           -EnvironmentName "${{ inputs.solution_name }}" `
@@ -69,7 +69,7 @@ runs:
       if: ${{ inputs.enable_version_compare == 'true' && inputs.mock_deploy != 'true' }}
       shell: pwsh
       run: |
-        $scriptPath = ".ci/templates/steps/dynamics/Compare-SolutionVersion.ps1"
+        $scriptPath = ".ci/.github/workflows/scripts/dynamics/Compare-SolutionVersion.ps1"
         $result = & $scriptPath `
           -SolutionName           "${{ inputs.solution_name }}" `
           -ArtifactFolder         "out/${{ inputs.solution_name }}" `

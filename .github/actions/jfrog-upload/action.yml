@@ -40,7 +40,7 @@ runs:
     - name: Upload artifacts to JFrog
       shell: pwsh
       run: |
-        $scriptPath = ".ci/templates/steps/dynamics/Invoke-JFrogAction.ps1"
+        $scriptPath = ".ci/.github/workflows/scripts/dynamics/Invoke-JFrogAction.ps1"
         $localPath = Split-Path "${{ inputs.managed_zip }}" -Parent
         & $scriptPath `
           -Action       "upload" `

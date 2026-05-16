@@ -58,7 +58,7 @@ runs:
       if: ${{ inputs.tag_prod_deployed == 'true' && inputs.mock_deploy != 'true' }}
       shell: pwsh
       run: |
-        $scriptPath = ".ci/templates/steps/dynamics/Invoke-JFrogAction.ps1"
+        $scriptPath = ".ci/.github/workflows/scripts/dynamics/Invoke-JFrogAction.ps1"
         & $scriptPath `
           -Action "tag-prod" `
           -SolutionName "${{ inputs.solution_name }}" `
@@ -72,7 +72,7 @@ runs:
     - name: Write deploy summary
       shell: pwsh
       run: |
-        $scriptPath = ".ci/templates/steps/dynamics/Write-DeploySummary.ps1"
+        $scriptPath = ".ci/.github/workflows/scripts/dynamics/Write-DeploySummary.ps1"
         & $scriptPath `
           -SolutionName "${{ inputs.solution_name }}" `
           -SolutionVersion "${{ inputs.solution_version }}" `

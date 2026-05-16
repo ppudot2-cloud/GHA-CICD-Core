@@ -149,7 +149,7 @@ runs:
         $ErrorActionPreference = 'Stop'
 
         # ── Helpers ──────────────────────────────────────────────────────────────
-        $scriptsDir  = "${{ github.workspace }}/.ci/templates/steps/dynamics"
+        $scriptsDir  = "${{ github.workspace }}/.ci/.github/workflows/scripts/dynamics"
         $isMock      = $env:MOCK_DEPLOY -eq 'true'
         $envName     = $env:ENVIRONMENT_NAME
         $envUrl      = $env:ENVIRONMENT_URL
