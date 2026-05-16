@@ -21,13 +21,15 @@
 #   3.  Verify base solutions present (pac solution list)
 #   4.  Blocking check (Invoke-BlockingCheck.ps1)
 #   5.  Version compare  → sets skip_import flag (Compare-SolutionVersion.ps1)
-#   6.  Backup current solution (pac solution export)
-#   7.  Import: standard or stage-and-upgrade (pac solution import / upgrade)
-#   8.  Import configuration migration data if requested (pac data import)
-#   9.  Publish customizations (pac solution publish)
-#  10.  Activate Cloud Flows (pac flow list + pac flow enable per flow)
-#  11.  Tag JFrog artifact as prodDeployed (Prod only)
-#  12.  Write per-solution deploy summary (Write-DeploySummary.ps1)
+#   6.  Find solution    → check if solution exists in target env (first install vs upgrade)
+#   7.  Backup current solution (pac solution export)
+#   8.  Import: standard or stage-and-upgrade (pac solution import / upgrade)
+#   9.  Import configuration migration data if requested (pac data import)
+#  10.  Publish customizations (pac solution publish)
+#  11.  Activate Cloud Flows (pac flow list + pac flow enable per flow)
+#  12.  Tag JFrog artifact as prodDeployed (Prod only)
+#  13.  Write per-solution deploy summary (Write-DeploySummary.ps1)
+#  14.  Upload backup artifact (GitHub artifact, outside loop)
 #
 # All steps respect mock_deploy — no Dataverse or JFrog calls are made.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -62,10 +64,6 @@ inputs:
     default: 'false'
   import_config_data:
     description: 'Import configuration migration data after solution import'
-    required: false
-    default: 'false'
-  trigger_upgrade:
-    description: 'Use stage-and-upgrade (holding) pattern for managed imports'
     required: false
     default: 'false'
   mock_deploy:
@@ -137,7 +135,6 @@ runs:
         ENABLE_BLOCKING_CHECK:     ${{ inputs.enable_blocking_check }}
         ENABLE_VERSION_COMPARE:    ${{ inputs.enable_version_compare }}
         IMPORT_CONFIG_DATA:        ${{ inputs.import_config_data }}
-        TRIGGER_UPGRADE:           ${{ inputs.trigger_upgrade }}
         ACTIVATE_FLOWS:            ${{ inputs.activate_flows }}
         MOCK_DEPLOY:               ${{ inputs.mock_deploy }}
         TAG_PROD_DEPLOYED:         ${{ inputs.tag_prod_deployed }}
@@ -276,8 +273,50 @@ runs:
               Write-Host "  enable_version_compare=false — skipping"
             }
 
-            # ── 6. Backup ──────────────────────────────────────────────────────
-            Write-Host "[$name] Step 6/11 — Backup"
+            # ── 6. Find solution in target environment ────────────────────────────
+            Write-Host "[$name] Step 6/14 — Find solution in $envName"
+            $solutionExists     = $false
+            $installedVersion   = ''
+            if ($isMock) {
+              Write-Host "  [MOCK] Solution lookup simulated — treating as first install" -ForegroundColor Cyan
+            } else {
+              try {
+                $listRaw  = pac solution list --environment $envUrl --json 2>&1
+                $allSols  = $listRaw | ConvertFrom-Json
+                $existing = $allSols | Where-Object {
+                  ($_.SolutionUniqueName -ieq $name) -or
+                  ($_.UniqueName         -ieq $name) -or
+                  ($_.solutionUniqueName -ieq $name) -or
+                  ($_.uniqueName         -ieq $name)
+                }
+                if ($existing) {
+                  $solutionExists   = $true
+                  $installedVersion = $existing.Version ?? $existing.version ?? 'unknown'
+                  Write-Host "  ✅ Found '$name' in $envName — installed version: $installedVersion"
+                  Write-Host "     → This is an UPGRADE"
+                } else {
+                  Write-Host "  ℹ️  '$name' not found in $envName — this is a FIRST INSTALL"
+                }
+              } catch {
+                Write-Warning "  Could not query solution list: $_"
+                Write-Warning "  Continuing — assuming solution may or may not exist"
+              }
+            }
+
+            # ── Determine effective upgrade mode ──────────────────────────────────
+            # Auto-select: upgrade if solution already exists, install if first time.
+            # Mock mode: no env query was made, so $solutionExists is always false → simulate install.
+            $effectiveUpgrade = $solutionExists
+            $importMode = if ($effectiveUpgrade) { 'UPGRADE (holding solution)' } else { 'INSTALL (standard)' }
+            $modeSource = if ($solutionExists) {
+              'auto-detected: solution already exists'
+            } else {
+              'auto-detected: first install'
+            }
+            Write-Host "  → Import mode: $importMode ($modeSource)"
+
+            # ── 7. Backup ──────────────────────────────────────────────────────
+            Write-Host "[$name] Step 7/14 — Backup"
             if ($env:ENABLE_BACKUP -eq 'true' -and -not $skipImport) {
               if ($isMock) {
                 Write-Host "  [MOCK] Backup of $name from $envName simulated" -ForegroundColor Cyan
@@ -299,14 +338,14 @@ runs:
             }
 
             # ── 7. Import solution ─────────────────────────────────────────────
-            Write-Host "[$name] Step 7/13 — Import solution"
+            Write-Host "[$name] Step 8/14 — Import solution"
             if ($skipImport) {
               Write-Host "  ⏭ Import skipped — version already current" -ForegroundColor Yellow
             } elseif ($isMock) {
               Write-Host "  [MOCK] Import of $name → $envName simulated" -ForegroundColor Cyan
-              Write-Host "    solution_type   : $($env:SOLUTION_TYPE)"
-              Write-Host "    trigger_upgrade : $($env:TRIGGER_UPGRADE)"
-              Write-Host "    settings_file   : $settingsResolved"
+              Write-Host "    solution_type : $($env:SOLUTION_TYPE)"
+              Write-Host "    import mode   : $importMode"
+              Write-Host "    settings_file : $settingsResolved"
             } else {
               $importArgs = @(
                 'solution', 'import',
@@ -317,21 +356,23 @@ runs:
               if ($settingsResolved -ne '') {
                 $importArgs += @('--settings-file', $settingsResolved)
               }
-              if ($env:TRIGGER_UPGRADE -eq 'true') {
+              if ($effectiveUpgrade) {
                 $importArgs += '--import-as-holding'
                 Write-Host "  Importing as holding (stage-and-upgrade)..."
+              } else {
+                Write-Host "  Importing (standard install)..."
               }
               pac @importArgs
 
               # Apply upgrade after holding import
-              if ($env:TRIGGER_UPGRADE -eq 'true') {
+              if ($effectiveUpgrade) {
                 Write-Host "  Applying solution upgrade..."
                 pac solution upgrade --solution-name $name --environment $envUrl --async
               }
             }
 
             # ── 8. Import configuration data ───────────────────────────────────
-            Write-Host "[$name] Step 8/13 — Config data"
+            Write-Host "[$name] Step 9/14 — Config data"
             if ($env:IMPORT_CONFIG_DATA -eq 'true' -and -not $skipImport) {
               if ($isMock) {
                 Write-Host "  [MOCK] Config data import simulated" -ForegroundColor Cyan
@@ -347,9 +388,11 @@ runs:
             }
 
             # ── 9. Publish customizations ──────────────────────────────────────
-            Write-Host "[$name] Step 9/13 — Publish customizations"
+            Write-Host "[$name] Step 10/14 — Publish customizations"
             if ($skipImport) {
               Write-Host "  Publish skipped — import skipped (version already current)"
+            } elseif ($effectiveUpgrade) {
+              Write-Host "  Publish skipped — upgrade pattern publishes during apply-upgrade"
             } elseif ($isMock) {
               Write-Host "  [MOCK] Publish customizations simulated" -ForegroundColor Cyan
             } else {
@@ -359,7 +402,7 @@ runs:
             }
 
             # ── 10. Activate Cloud Flows ───────────────────────────────────────
-            Write-Host "[$name] Step 10/13 — Activate Cloud Flows"
+            Write-Host "[$name] Step 11/14 — Activate Cloud Flows"
             if ($skipImport) {
               Write-Host "  Activate skipped — import skipped (version already current)"
             } elseif ($env:ACTIVATE_FLOWS -ne 'true') {
@@ -415,7 +458,7 @@ runs:
             }
 
             # ── 11. JFrog Prod tag ─────────────────────────────────────────────
-            Write-Host "[$name] Step 11/13 — JFrog Prod tag"
+            Write-Host "[$name] Step 12/14 — JFrog Prod tag"
             if ($env:TAG_PROD_DEPLOYED -eq 'true' -and -not $isMock -and $env:JFROG_URL -ne '') {
               Write-Host "  Tagging $artifactName as prodDeployed in JFrog..."
               & "$scriptsDir/Invoke-JFrogAction.ps1" `
@@ -430,7 +473,7 @@ runs:
                 -TagProperties   "prodDeployed=true"
             }
             # ── 12. Deploy summary ─────────────────────────────────────────────
-            Write-Host "[$name] Step 12/13 — Deploy summary"
+            Write-Host "[$name] Step 13/14 — Deploy summary"
             & "$scriptsDir/Write-DeploySummary.ps1" `
               -SolutionName    $name `
               -EnvironmentName $envName `

@@ -72,11 +72,6 @@ on:
         required: false
         type: boolean
         default: false
-      trigger_upgrade:
-        description: 'Whether holding-solution upgrade pattern is enabled'
-        required: false
-        type: boolean
-        default: false
       base_solutions:
         description: 'Comma-separated base solution names to verify'
         required: false
@@ -199,7 +194,6 @@ jobs:
           Write-Host "── Toggles ─────────────────────────────────────────────"
           Write-Host ("  {0,-24} {1}" -f "mock_deploy",         (Flag '${{ inputs.mock_deploy }}'))
           Write-Host ("  {0,-24} {1}" -f "enable_backup",       (Flag '${{ inputs.enable_backup }}'))
-          Write-Host ("  {0,-24} {1}" -f "trigger_upgrade",     (Flag '${{ inputs.trigger_upgrade }}'))
           Write-Host ("  {0,-24} {1}" -f "checker_error_level", '${{ inputs.checker_error_level || 'HighIssue' }}')
           Write-Host ("  {0,-24} {1}" -f "base_solutions",      '${{ inputs.base_solutions || '(none)' }}')
           Write-Host ""
@@ -263,7 +257,6 @@ jobs:
           $md += "### Toggles`n`n| Toggle | Value |`n|---|---|`n"
           $md += "| mock_deploy | $(Flag '${{ inputs.mock_deploy }}') |`n"
           $md += "| enable_backup | $(Flag '${{ inputs.enable_backup }}') |`n"
-          $md += "| trigger_upgrade | $(Flag '${{ inputs.trigger_upgrade }}') |`n"
           $md += "| checker_error_level | ``${{ inputs.checker_error_level || 'HighIssue' }}`` |`n"
           $md += "| base_solutions | ``${{ inputs.base_solutions || '(none)' }}`` |`n`n"
           $md += "### Solutions (${{ inputs.solution_count }})`n`n"

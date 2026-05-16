@@ -32,7 +32,7 @@
 #     'UAT,Prod'                → Pipeline 2 (UAT re-validation + Prod, parallel)
 #
 # INPUT STRUCTURE — two layers:
-#   Common inputs:  matrix, mock_deploy, trigger_upgrade, base_solutions,
+#   Common inputs:  matrix, mock_deploy, base_solutions,
 #                   jfrog_url, jfrog_repo, run_number, run_attempt
 #   Per-env inputs: dev_config, intg_config, uat_config, frs_config,
 #                   perf_config, prod_config  (compact JSON objects)
@@ -77,11 +77,6 @@ on:
       # ── Common options ────────────────────────────────────────────────────
       mock_deploy:
         description: 'Simulate all deployments without touching Power Platform'
-        required: false
-        type: boolean
-        default: false
-      trigger_upgrade:
-        description: 'Use stage-and-upgrade (holding) pattern for managed imports'
         required: false
         type: boolean
         default: false
@@ -185,7 +180,6 @@ jobs:
           import_config_data:       ${{ fromJson(inputs.dev_config).import_config_data }}
           previous_environment_url: ${{ fromJson(inputs.dev_config).previous_url }}
           tag_prod_deployed:        false
-          trigger_upgrade:          ${{ inputs.trigger_upgrade }}
           mock_deploy:              ${{ inputs.mock_deploy }}
           base_solutions:           ${{ inputs.base_solutions }}
           jfrog_url:                ${{ inputs.jfrog_url }}
@@ -240,7 +234,6 @@ jobs:
           import_config_data:       ${{ fromJson(inputs.intg_config).import_config_data }}
           previous_environment_url: ${{ fromJson(inputs.intg_config).previous_url }}
           tag_prod_deployed:        false
-          trigger_upgrade:          ${{ inputs.trigger_upgrade }}
           mock_deploy:              ${{ inputs.mock_deploy }}
           base_solutions:           ${{ inputs.base_solutions }}
           jfrog_url:                ${{ inputs.jfrog_url }}
@@ -295,7 +288,6 @@ jobs:
           import_config_data:       ${{ fromJson(inputs.uat_config).import_config_data }}
           previous_environment_url: ${{ fromJson(inputs.uat_config).previous_url }}
           tag_prod_deployed:        false
-          trigger_upgrade:          ${{ inputs.trigger_upgrade }}
           mock_deploy:              ${{ inputs.mock_deploy }}
           base_solutions:           ${{ inputs.base_solutions }}
           jfrog_url:                ${{ inputs.jfrog_url }}
@@ -350,7 +342,6 @@ jobs:
           import_config_data:       ${{ fromJson(inputs.frs_config).import_config_data }}
           previous_environment_url: ${{ fromJson(inputs.frs_config).previous_url }}
           tag_prod_deployed:        false
-          trigger_upgrade:          ${{ inputs.trigger_upgrade }}
           mock_deploy:              ${{ inputs.mock_deploy }}
           base_solutions:           ${{ inputs.base_solutions }}
           jfrog_url:                ${{ inputs.jfrog_url }}
@@ -405,7 +396,6 @@ jobs:
           import_config_data:       ${{ fromJson(inputs.perf_config).import_config_data }}
           previous_environment_url: ${{ fromJson(inputs.perf_config).previous_url }}
           tag_prod_deployed:        false
-          trigger_upgrade:          ${{ inputs.trigger_upgrade }}
           mock_deploy:              ${{ inputs.mock_deploy }}
           base_solutions:           ${{ inputs.base_solutions }}
           jfrog_url:                ${{ inputs.jfrog_url }}
@@ -461,7 +451,6 @@ jobs:
           import_config_data:       ${{ fromJson(inputs.prod_config).import_config_data }}
           previous_environment_url: ${{ fromJson(inputs.prod_config).previous_url }}
           tag_prod_deployed:        true
-          trigger_upgrade:          ${{ inputs.trigger_upgrade }}
           mock_deploy:              ${{ inputs.mock_deploy }}
           base_solutions:           ${{ inputs.base_solutions }}
           jfrog_url:                ${{ inputs.jfrog_url }}
