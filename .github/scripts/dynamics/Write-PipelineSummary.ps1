@@ -112,15 +112,15 @@ if ($JobSummariesDir -and (Test-Path $JobSummariesDir)) {
 ---
 ## 🏗️ Build Details
 
-| Solution | Version | Artifact | Checker Geo | JFrog | Mock |
-| --- | --- | --- | --- | --- | --- |
+| Solution | Version | Artifact | JFrog | Mock |
+| --- | --- | --- | --- | --- |
 "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
             foreach ($f in $buildFiles) {
                 $rec = Get-Content $f.FullName -Raw | ConvertFrom-Json
                 $jfrogIcon = if ($rec.jfrog_enabled) { '✅' } else { '—' }
                 $mockIcon  = if ($rec.mock_deploy)   { '🧪' } else { '—' }
-                "| ``$($rec.solution)`` | ``$($rec.version)`` | ``$($rec.artifact_name)`` | $($rec.checker_geo) | $jfrogIcon | $mockIcon |" |
+                "| ``$($rec.solution)`` | ``$($rec.version)`` | ``$($rec.artifact_name)`` | $jfrogIcon | $mockIcon |" |
                     Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
             }
             "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append

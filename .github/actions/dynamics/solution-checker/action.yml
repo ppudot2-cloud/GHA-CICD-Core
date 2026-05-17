@@ -17,9 +17,6 @@ inputs:
     required: true
   managed_zip:
     required: true
-  checker_geo:
-    required: false
-    default: 'UnitedStates'
   checker_error_level:
     required: false
     default: 'HighIssue'
@@ -44,7 +41,7 @@ runs:
         client-secret:              ${{ env.PP_CLIENT_SECRET }}
         tenant-id:                  ${{ env.PP_TENANT_ID }}
         path:                       ${{ inputs.unmanaged_zip }}
-        geo:                        ${{ inputs.checker_geo }}
+        geo:                        UnitedStates
         fail-on-analysis-error:     true
         error-level:                ${{ inputs.checker_error_level }}
         checker-logs-artifact-name: ${{ inputs.checker_artifact_name }}
@@ -85,5 +82,4 @@ runs:
           -SolutionName  '${{ inputs.solution_name }}' `
           -UnmanagedZip  '${{ inputs.unmanaged_zip }}' `
           -ManagedZip    '${{ inputs.managed_zip }}' `
-          -CheckerGeo    '${{ inputs.checker_geo }}' `
           -ErrorLevel    '${{ inputs.checker_error_level }}'

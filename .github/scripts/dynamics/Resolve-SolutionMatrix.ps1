@@ -32,7 +32,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # ── 1. Load solution registry ─────────────────────────────────────────────────
-# Primary source: solutions.json (contains deployOrder, checkerGeo, etc.)
+# Primary source: solutions.json (contains deployOrder, dataSchemaFile, deploymentSettings, etc.)
 # Fallback: filesystem scan of src/solutions/ (order = alphabetical)
 
 $registry = @()   # array of objects with at least .name and .deployOrder
@@ -106,7 +106,6 @@ $selectedEntries = $registry |
         [PSCustomObject]@{
             name                       = $_.name
             source_folder              = if ($_.folder) { $_.folder } else { "src/solutions/$($_.name)" }
-            checker_geo                = if ($_.checkerGeo) { $_.checkerGeo } else { 'UnitedStates' }
             data_schema_file           = if ($_.dataSchemaFile) { $_.dataSchemaFile } else { '' }
             deployment_settings_prefix = 'deployment-settings'
         }

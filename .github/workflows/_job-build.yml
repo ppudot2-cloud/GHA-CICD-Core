@@ -35,11 +35,6 @@ on:
         required: false
         type: boolean
         default: false
-      checker_geo:
-        description: 'Solution Checker geography (e.g. UnitedStates)'
-        required: false
-        type: string
-        default: 'UnitedStates'
       checker_error_level:
         description: 'Solution Checker error threshold (CriticalIssueCount | HighIssueCount)'
         required: false
@@ -156,7 +151,6 @@ jobs:
           solution_name:         ${{ inputs.solution_name }}
           unmanaged_zip:         ${{ steps.pack.outputs.unmanaged_zip }}
           managed_zip:           ${{ steps.pack.outputs.managed_zip }}
-          checker_geo:           ${{ inputs.checker_geo }}
           checker_error_level:   ${{ inputs.checker_error_level }}
           checker_artifact_name: ${{ steps.pack.outputs.checker_artifact_name }}
           mock_deploy:           ${{ inputs.mock_deploy }}

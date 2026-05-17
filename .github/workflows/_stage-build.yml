@@ -28,8 +28,7 @@ on:
         description: >
           JSON array of solution objects, e.g.:
           [{"name":"CoreSolution","source_folder":"src/solutions/CoreSolution",
-            "checker_geo":"UnitedStates","data_schema_file":"",
-            "deployment_settings_prefix":"deployment-settings"}]
+            "data_schema_file":"","deployment_settings_prefix":"deployment-settings"}]
         required: true
         type: string
       mock_deploy:
@@ -156,7 +155,6 @@ jobs:
       solution_name:          ${{ matrix.solution.name }}
       solution_source_folder: ${{ matrix.solution.source_folder || 'src/solutions' }}
       use_exported_source:    ${{ inputs.use_exported_source }}
-      checker_geo:            ${{ matrix.solution.checker_geo || 'UnitedStates' }}
       checker_error_level:    ${{ inputs.checker_error_level }}
       data_schema_file:       ${{ matrix.solution.data_schema_file || '' }}
       source_environment_url: ${{ inputs.source_environment_url }}

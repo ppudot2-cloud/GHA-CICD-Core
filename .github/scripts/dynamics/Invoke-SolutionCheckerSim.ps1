@@ -19,9 +19,6 @@
 .PARAMETER ManagedZip
     Full path to the managed ZIP.
 
-.PARAMETER CheckerGeo
-    Solution Checker geography endpoint (informational only in simulation).
-
 .PARAMETER ErrorLevel
     Minimum severity level that would fail the checker (informational in simulation).
     Valid values: CriticalIssue, HighIssue, MediumIssue, LowIssue, InformationalIssue
@@ -30,7 +27,6 @@ param(
     [Parameter(Mandatory)][string] $SolutionName,
     [Parameter(Mandatory)][string] $UnmanagedZip,
     [Parameter(Mandatory)][string] $ManagedZip,
-    [string] $CheckerGeo   = 'UnitedStates',
     [string] $ErrorLevel   = 'HighIssue'
 )
 
@@ -44,7 +40,7 @@ $fail = $false
 @"
 ## 🧪 Solution Checker — Simulation
 _mock_deploy=true — validating ZIP structure locally, no PP credentials used_
-**Geography (would use):** ``$CheckerGeo``
+**Geography:** UnitedStates
 **Error Level threshold:** ``$ErrorLevel``
 
 | Check | ZIP | Result |
@@ -140,7 +136,7 @@ foreach ($entry in @(
 ### Simulated Rule Categories
 | Rule Category | Simulated Result |
 | --- | --- |
-| AppSource Package Compliance | 🧪 Would run against geo: ``$CheckerGeo`` |
+| AppSource Package Compliance | 🧪 Would run against geo: UnitedStates |
 | Managed Solution Accessibility | 🧪 Simulated — no issues |
 | Usage Telemetry | 🧪 Simulated — no issues |
 | Performance | 🧪 Simulated — no issues |

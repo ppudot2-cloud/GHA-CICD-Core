@@ -17,9 +17,6 @@
 .PARAMETER MockDeploy
     Whether this was a mock_deploy run.
 
-.PARAMETER CheckerGeo
-    Solution Checker geography used.
-
 .PARAMETER DataSchemaFile
     Path to data schema file (empty string = not used).
 
@@ -43,7 +40,6 @@ param(
     [Parameter(Mandatory)][AllowEmptyString()][string] $ArtifactName,
     [Parameter(Mandatory)][string] $RunNumber,
     [bool]   $MockDeploy        = $false,
-    [string] $CheckerGeo        = 'UnitedStates',
     [string] $DataSchemaFile    = '',
     [bool]   $EnableJFrogUpload = $true,
     [string] $JFrogUrl          = '',
@@ -56,7 +52,7 @@ param(
 $checkerRow = if ($MockDeploy) {
     "| Solution Checker | mock_deploy | 🧪 Simulated (ZIP + XML validation) |"
 } else {
-    "| Solution Checker | live (always on) | ✅ Real (geo: ``$CheckerGeo``) |"
+    "| Solution Checker | live (always on) | ✅ Real (geo: UnitedStates) |"
 }
 
 $dataRow = if (-not $DataSchemaFile) {
@@ -105,7 +101,6 @@ if ($JsonOutputPath) {
         artifact_name    = $ArtifactName
         run_number       = $RunNumber
         mock_deploy      = $MockDeploy
-        checker_geo      = $CheckerGeo
         data_schema_file = $DataSchemaFile
         jfrog_enabled    = $EnableJFrogUpload
         jfrog_url        = $JFrogUrl
