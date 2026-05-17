@@ -89,5 +89,5 @@ runs:
       shell: pwsh
       run: |
         pwsh .ci/.github/scripts/dynamics/Merge-Variables.ps1 `
-          -GlobalVarsPath  ".ci/templates/variables/dynamics/global-vars.yml" `
+          -GlobalVarsPath  ".ci/.github/variables/dynamics/global-vars.yml" `
           -ProjectVarsPath ".github/config/project-vars.yml"
