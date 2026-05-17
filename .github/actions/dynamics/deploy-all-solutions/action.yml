@@ -316,8 +316,11 @@ runs:
             Write-Host "  → Import mode: $importMode ($modeSource)"
 
             # ── 7. Backup ──────────────────────────────────────────────────────
+            # Only taken on upgrades (solution already installed). First installs
+            # have nothing to export — skip silently so auto-rollback is not
+            # attempted on a fresh install failure either.
             Write-Host "[$name] Step 7/14 — Backup"
-            if ($env:ENABLE_BACKUP -eq 'true' -and -not $skipImport) {
+            if ($env:ENABLE_BACKUP -eq 'true' -and -not $skipImport -and $solutionExists) {
               if ($isMock) {
                 Write-Host "  [MOCK] Backup of $name from $envName simulated" -ForegroundColor Cyan
               } else {
@@ -325,12 +328,14 @@ runs:
                 $backupPath = "$backupDir/${name}_${envName}_backup.zip"
                 Write-Host "  Exporting backup → $backupPath"
                 pac solution export `
-                  --name    $name `
-                  --path    $backupPath `
+                  --name        $name `
+                  --path        $backupPath `
                   --managed `
                   --environment $envUrl
                 Write-Host "  ✓ Backup exported"
               }
+            } elseif ($env:ENABLE_BACKUP -eq 'true' -and -not $solutionExists -and -not $skipImport) {
+              Write-Host "  Backup skipped — first install (no previous version to back up)" -ForegroundColor Yellow
             } elseif ($skipImport) {
               Write-Host "  Backup skipped — import will be skipped (version already current)"
             } else {
@@ -486,6 +491,38 @@ runs:
           } catch {
             $failed.Add($name)
             Write-Error "❌ [$name] Failed to deploy to $envName`: $_"
+
+            # ── Inline auto-rollback ───────────────────────────────────────────
+            # Only attempted when enable_backup=true AND this was an upgrade
+            # (backup only exists for upgrades — first-install failures have
+            # nothing to restore to).
+            if ($env:ENABLE_BACKUP -eq 'true' -and $solutionExists) {
+              $backupPath = "$backupDir/${name}_${envName}_backup.zip"
+              if (-not $isMock -and (Test-Path $backupPath)) {
+                Write-Host ""
+                Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+                Write-Host "  ⚠️  AUTO-ROLLBACK — [$name] → $envName" -ForegroundColor Yellow
+                Write-Host "  Restoring previous version from: $backupPath" -ForegroundColor Yellow
+                Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+                try {
+                  pac solution import `
+                    --path          $backupPath `
+                    --environment   $envUrl `
+                    --force-overwrite
+                  Write-Host "  ✅ [$name] Rollback succeeded — previous version restored to $envName" -ForegroundColor Green
+                } catch {
+                  Write-Error "  ❌ [$name] Auto-rollback also failed: $_"
+                  Write-Error "  $envName may be in a broken state. Manual intervention required."
+                }
+              } elseif ($isMock) {
+                Write-Host "  [MOCK] Auto-rollback simulated for $name → $envName" -ForegroundColor Cyan
+              } else {
+                Write-Warning "  [$name] enable_backup=true but backup file not found at $backupPath"
+                Write-Warning "  This should not happen for an upgrade — check whether the backup step succeeded."
+              }
+            } else {
+              Write-Host "  [$name] enable_backup=false or first install — no auto-rollback" -ForegroundColor Yellow
+            }
           } finally {
             Write-Host "::endgroup::"
           }
