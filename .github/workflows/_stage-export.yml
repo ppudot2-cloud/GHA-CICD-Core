@@ -1,19 +1,29 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # _stage-export.yml  —  Reusable EXPORT STAGE
 #
-# Fans out per solution (parallel) and for each solution:
+# TWO MODES — controlled by the skip_export input:
+#
+# skip_export=false (default — sandbox export mode):
+#   Fans out per solution (parallel) and for each solution:
 #   1. ci-bootstrap    – checkout, Azure OIDC login, AKV secrets, merge vars
 #   2. pac-install     – install PAC CLI
 #   3. export-solution – export unmanaged ZIP from sandbox, unpack to source tree
 #   4. upload-artifact – upload unpacked source as exported-source-<name> artifact
-#
-# After all exports complete:
+#   Then the commit job:
 #   5. commit – create feature/pipeline-{run_number} from origin/main, copy
 #               exported source, write pipeline-context.json, push to origin.
-#               Git operations are always real — mock_deploy only suppresses PP imports.
+#
+# skip_export=true (manual export mode):
+#   The per-solution export jobs are SKIPPED. The user has already exported,
+#   unpacked, and committed the solution source to a feature/* branch.
+#   The commit job still runs to write pipeline-context.json onto that branch
+#   so Pipeline 2 can locate the build artifacts later.
+#   No branch creation, no source copy — just pipeline-context.json on top.
+#
+# Git operations are always real — mock_deploy only suppresses PP imports.
 #
 # Outputs:
-#   feature_branch – the branch name created and pushed by the commit job
+#   feature_branch – branch name that was created (normal) or used (skip_export)
 # ─────────────────────────────────────────────────────────────────────────────
 on:
   workflow_call:
@@ -35,6 +45,14 @@ on:
         description: 'Comma-separated solution names — used by the commit job to copy source trees'
         required: true
         type: string
+      skip_export:
+        description: >
+          Skip sandbox export — use source already committed to the current branch.
+          Set automatically when triggered by a push event. The export matrix jobs
+          are skipped; the commit job still runs to write pipeline-context.json.
+        required: false
+        type: boolean
+        default: false
 
     outputs:
       feature_branch:
@@ -45,6 +63,7 @@ jobs:
   export:
     name: "📤 Export | ${{ matrix.solution.name }}"
     runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_export }}   # skipped in manual / push-triggered mode
     strategy:
       matrix: ${{ fromJson(inputs.matrix) }}
       fail-fast: false   # export failures are isolated per solution
@@ -89,15 +108,27 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # commit  —  runs after ALL export jobs finish
+  # commit  —  runs after ALL export jobs finish (or are skipped)
   #
-  # Creates feature/pipeline-{run_number} from origin/main, copies the exported
-  # source trees, writes pipeline-context.json, and pushes. Always real git —
-  # mock_deploy only suppresses Power Platform imports, not git operations.
+  # skip_export=false (normal sandbox export):
+  #   Creates feature/pipeline-{run_number} from origin/main, copies the
+  #   exported source trees from artifacts, writes pipeline-context.json, pushes.
+  #
+  # skip_export=true (manual export / push-triggered):
+  #   The per-solution export jobs above were skipped. We are already on the
+  #   correct feature/* branch (the user committed there). This job only writes
+  #   pipeline-context.json on top of that branch so Pipeline 2 can find the
+  #   build artifacts. No branch creation, no source copying.
+  #
+  # Always real git — mock_deploy only suppresses Power Platform imports.
   # ─────────────────────────────────────────────────────────────────────────────
   commit:
-    name: "📤 Commit → feature/pipeline-${{ github.run_number }}"
+    name: "📤 Commit pipeline context"
     needs: [export]
+    # Run even when export jobs were skipped (skip_export=true). The default
+    # GitHub Actions behaviour would skip this job too if its dependency was
+    # skipped, so we override with an explicit condition.
+    if: always() && (needs.export.result == 'success' || needs.export.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -113,69 +144,95 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      # Only download export artifacts in normal (non-skip) mode.
+      # In skip_export mode there are no exported-source-* artifacts.
       - name: Download all exported source artifacts
+        if: ${{ inputs.skip_export != true }}
         uses: actions/download-artifact@v4
         with:
           pattern: exported-source-*
           path: _export-src/
           merge-multiple: false
 
-      - name: Create branch, copy source, write context, push
+      - name: Commit source + write pipeline-context.json + push
         id: push
         shell: pwsh
         run: |
+          $skipExport = '${{ inputs.skip_export }}' -eq 'true'
           $isMock     = '${{ inputs.mock_deploy }}' -eq 'true'
           $runNumber  = '${{ github.run_number }}'
           $runAttempt = '${{ github.run_attempt }}'
           $runId      = '${{ github.run_id }}'
-          $branch     = "feature/pipeline-$runNumber"
 
           git config user.name  "GitHub Actions"
           git config user.email "actions@github.com"
 
-          # Always branch from the latest main
-          git fetch origin main
-          git checkout -b $branch origin/main
-          Write-Host "  ✓ Created branch $branch from origin/main"
+          if ($skipExport) {
+            # ── Manual / push-triggered mode ──────────────────────────────────
+            # Source is already committed to this branch by the user.
+            # Stay on the current branch — just write pipeline-context.json.
+            $branch = '${{ github.ref_name }}'
+            git fetch origin
+            Write-Host "  ✓ Skip-export mode — using existing branch: $branch"
+            Write-Host "    Source committed by: ${{ github.actor }}"
+          } else {
+            # ── Normal sandbox-export mode ────────────────────────────────────
+            # Create a fresh feature branch from main, copy exported sources.
+            $branch = "feature/pipeline-$runNumber"
+            git fetch origin main
+            git checkout -b $branch origin/main
+            Write-Host "  ✓ Created branch $branch from origin/main"
 
+            $solutions = '${{ inputs.solution_list }}' -split ',' |
+              ForEach-Object { $_.Trim() } | Where-Object { $_ }
+
+            foreach ($sol in $solutions) {
+              $srcDir = "_export-src/exported-source-$sol"
+              $dstDir = "src/solutions/$sol"
+              if (Test-Path $srcDir) {
+                if (Test-Path $dstDir) { Remove-Item $dstDir -Recurse -Force }
+                Copy-Item $srcDir $dstDir -Recurse -Force
+                Write-Host "  ✓ Copied $sol → src/solutions/$sol/"
+              } else {
+                Write-Warning "  ⚠ Exported source not found for $sol at $srcDir — using existing tree"
+              }
+            }
+
+            # Write a per-run export marker inside every solution folder.
+            # Guarantees the feature branch always has at least one commit ahead of
+            # main — even in mock mode where source is unchanged — so gh pr create
+            # never fails with "nothing to merge".
+            foreach ($sol in $solutions) {
+              $markerDir = "src/solutions/$sol"
+              if (Test-Path $markerDir) {
+                $exportMode = if ($isMock) { 'mock (source unchanged, simulated export)' } else { 'real (exported from sandbox)' }
+                $marker = [ordered]@{
+                  pipelineRunId      = $runId
+                  pipelineRunNumber  = [int]$runNumber
+                  pipelineRunAttempt = [int]$runAttempt
+                  exportMode         = $exportMode
+                  exportedAt         = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+                  exportedBy         = '${{ github.actor }}'
+                  sandboxUrl         = '${{ inputs.source_environment_url }}'
+                }
+                $marker | ConvertTo-Json | Set-Content "$markerDir/.pipeline-export.json" -Encoding UTF8
+                Write-Host "  ✓ Written export marker → $markerDir/.pipeline-export.json"
+              }
+            }
+
+            if (Test-Path '_export-src') { Remove-Item '_export-src' -Recurse -Force }
+          }
+
+          # ── Both modes: write pipeline-context.json ───────────────────────
+          # Pipeline 2 reads this file from main to locate the Phase 1 run_id
+          # and download the built solution artifacts.
           $solutions = '${{ inputs.solution_list }}' -split ',' |
             ForEach-Object { $_.Trim() } | Where-Object { $_ }
 
-          foreach ($sol in $solutions) {
-            $srcDir = "_export-src/exported-source-$sol"
-            $dstDir = "src/solutions/$sol"
-            if (Test-Path $srcDir) {
-              if (Test-Path $dstDir) { Remove-Item $dstDir -Recurse -Force }
-              Copy-Item $srcDir $dstDir -Recurse -Force
-              Write-Host "  ✓ Copied $sol → src/solutions/$sol/"
-            } else {
-              Write-Warning "  ⚠ Exported source not found for $sol at $srcDir — using existing tree"
-            }
-          }
+          $exportMode = if ($skipExport) { 'manual (user-committed source)' } `
+                        elseif ($isMock) { 'mock (simulated sandbox export)' } `
+                        else             { 'real (exported from sandbox)' }
 
-          # Write a per-run export marker inside every solution folder.
-          # This guarantees the feature branch always has at least one commit ahead of
-          # main — even in mock mode where the solution source is unchanged — so that
-          # gh pr create never fails with "nothing to merge".
-          foreach ($sol in $solutions) {
-            $markerDir = "src/solutions/$sol"
-            if (Test-Path $markerDir) {
-              $exportMode = if ($isMock) { 'mock (source unchanged, simulated export)' } else { 'real (exported from sandbox)' }
-              $marker = [ordered]@{
-                pipelineRunId      = $runId
-                pipelineRunNumber  = [int]$runNumber
-                pipelineRunAttempt = [int]$runAttempt
-                exportMode         = $exportMode
-                exportedAt         = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
-                exportedBy         = '${{ github.actor }}'
-                sandboxUrl         = '${{ inputs.source_environment_url }}'
-              }
-              $marker | ConvertTo-Json | Set-Content "$markerDir/.pipeline-export.json" -Encoding UTF8
-              Write-Host "  ✓ Written export marker → $markerDir/.pipeline-export.json"
-            }
-          }
-
-          # pipeline-context.json — read by Pipeline 2 to locate Phase 1 artifacts
           $ctx = [ordered]@{
             runId         = $runId
             runNumber     = $runNumber
@@ -186,27 +243,37 @@ jobs:
             featureBranch = $branch
             triggeredBy   = '${{ github.actor }}'
             triggeredAt   = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+            exportMode    = $exportMode
             mockDeploy    = $isMock
           }
           $ctx | ConvertTo-Json -Depth 3 | Set-Content 'pipeline-context.json' -Encoding UTF8
-          Write-Host "  ✓ Written pipeline-context.json (runId=$runId)"
+          Write-Host "  ✓ Written pipeline-context.json (runId=$runId, branch=$branch, mode=$exportMode)"
 
-          if (Test-Path '_export-src') { Remove-Item '_export-src' -Recurse -Force }
-
-          git add src/solutions/ pipeline-context.json
+          # Stage the right set of files depending on mode
+          if ($skipExport) {
+            git add pipeline-context.json
+          } else {
+            git add src/solutions/ pipeline-context.json
+          }
 
           $status = git status --porcelain
           if ($status) {
-            $mockTag = if ($isMock) { ' [mock]' } else { '' }
-            $commitMsg = "chore: export from sandbox — pipeline run #$runNumber$mockTag [skip ci]"
+            $mockTag  = if ($isMock)     { ' [mock]' }   else { '' }
+            $modeTag  = if ($skipExport) { 'manual export' } else { 'sandbox export' }
+            $commitMsg = "chore: $modeTag — pipeline run #$runNumber$mockTag [skip ci]"
             git commit -m $commitMsg
             Write-Host "  ✓ Committed: $commitMsg"
           } else {
-            Write-Host "  ℹ No source changes — branch pointer only"
+            Write-Host "  ℹ No changes to commit"
           }
 
-          # Always push — mock_deploy only skips PP imports, not git operations
-          git push origin $branch
+          if ($skipExport) {
+            # Existing remote branch — use --force-with-lease for safety
+            git push origin HEAD --force-with-lease
+          } else {
+            # New branch — plain push
+            git push origin $branch
+          }
           Write-Host "  ✓ Pushed branch $branch to origin"
 
           "feature_branch=$branch" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
