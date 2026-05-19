@@ -1,0 +1,304 @@
+# =============================================================================
+# COMPOSITE ACTION: ServiceNow Change Management
+# =============================================================================
+#
+# Manages the full ServiceNow change request lifecycle around a deployment.
+#
+# PRE-DEPLOY PHASE (phase=pre-deploy):
+#   1.  Load ServiceNow PowerShell module from .ci checkout
+#   2.  Set dynamic runtime environment variables (description, env, build ID)
+#   3.  Open ServiceNow change request     (New-ServiceNowChangeRequest)
+#   4.  Attach audit trail — Solution Checker SARIF
+#                                          (Add-ServiceNowAuditTrailArtifact)
+#   5.  Set change window                  (Set-ServiceNowChangeWindow)
+#   6.  Check for SNOW change conflicts    (Get-ServiceNowConflict)
+#   7.  Request SNOW approval              (Request-ServiceNowApproval)
+#   8.  Poll until approved or timeout     (Get-ServiceNowApprovalStatus)
+#       → Blocks pipeline until SNOW approves. Fails on rejection/timeout.
+#
+# POST-DEPLOY PHASE (phase=post-deploy):
+#  12.  Find GitHub Environment approvers  (GitHub Actions REST API)
+#  13.  Detect deployment status           (reads SNOW_DEPLOY_STATUS env var
+#                                           written by the deploy step)
+#  14.  Close change request               (Close-ServiceNowChangeRequest)
+#       → close_code: 'successful' or 'unsuccessful' based on deploy status
+#       → always runs (if: always()) so the CR is closed even on failure
+#
+# REQUIRED ENV VARS (populated by ci-bootstrap when servicenow_enabled=true):
+#   SERVICENOWMURI              ServiceNow instance base URL
+#   SNOW_OAUTH_CLIENT_ID        OAuth client ID  (AKV: snow-oauth-client-id)
+#   SNOW_OAUTH_CLIENT_SECRET    OAuth secret     (AKV: snow-oauth-client-secret)
+#
+# PERSISTENT ENV VARS (written by pre-deploy, read by post-deploy):
+#   SNOW_CHANGE_REQUEST_NUMBER  Change number  e.g. CHG0012345
+#   SNOW_CHANGE_REQUEST_ID      sys_id GUID of the change record
+#   SNOW_CHANGE_RISK_LEVEL      Risk level returned by SNOW after creation
+#   SNOW_DEPLOY_STATUS          'success' or 'failure' — written by deploy step
+#
+# OPTIONAL VARIABLES (via global-vars.yml / project-vars.yml):
+#   SERVICENOWCHANGETYPE        Change type (default: 'standard')
+#   SERVICENOWASSIGNMENTGROUP   Assignment group
+#   SERVICENOWJUSTIFICATION     Business justification text
+#   SERVICENOWIMPLEMENTATIONPLAN Implementation plan text
+#   SERVICENOWBACKOUTPLAN       Backout / rollback plan text
+#   SERVICENOWRISKIMPACTANALYSIS Risk and impact narrative
+#   SERVICENOWRISKLEVEL         Risk level (default: 'Low')
+#   SERVICENOWIMPACTLEVEL       Impact level (default: '3 - Low')
+#   SERVICENOWCONFIGURATIONITEM CMDB CI linked to this change
+#   SERVICENOWCATEGORY          Change category
+#   SERVICENOWSERVICENAME       Business service name in SNOW
+#   SERVICENOW_DESIRED_DAY      Day of week for change window (default: today)
+# =============================================================================
+
+name: 'ServiceNow Change Management'
+description: 'Manages ServiceNow CR lifecycle: pre-deploy (open/approve) and post-deploy (find-approvers/detect-status/close)'
+
+inputs:
+  phase:
+    description: 'Lifecycle phase — pre-deploy or post-deploy'
+    required: true
+  environment_name:
+    description: 'Target deployment environment (Dev, Intg, UAT, Prod, etc.)'
+    required: true
+  solution_list:
+    description: 'Comma-separated solution names being deployed — used in CR description'
+    required: false
+    default: ''
+  sarif_path:
+    description: 'Path to Solution Checker SARIF file for audit trail attachment (optional)'
+    required: false
+    default: ''
+  mock_deploy:
+    description: 'Skip all ServiceNow API calls in dry-run mode'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+
+    # ── Mock: log and exit ───────────────────────────────────────────────────
+    - name: ServiceNow [${{ inputs.phase }}] — MOCK
+      if: ${{ inputs.mock_deploy == 'true' }}
+      shell: bash
+      run: |
+        echo "::notice::🔵 [MOCK] ServiceNow ${{ inputs.phase }} skipped (mock_deploy=true)"
+        echo "  environment : ${{ inputs.environment_name }}"
+        echo "  solution(s) : ${{ inputs.solution_list }}"
+
+    # ========================================================================
+    # PRE-DEPLOY: Steps 1-8 — Open CR, attach audit trail, set window,
+    #             check conflicts, request and poll for approval
+    # ========================================================================
+    - name: ServiceNow — Open Change Request + Approval Gate
+      if: ${{ inputs.phase == 'pre-deploy' && inputs.mock_deploy != 'true' }}
+      shell: pwsh
+      env:
+        ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+        SOLUTION_LIST:    ${{ inputs.solution_list }}
+        SARIF_PATH:       ${{ inputs.sarif_path }}
+      run: |
+        Set-StrictMode -Version Latest
+        $ErrorActionPreference = 'Stop'
+
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        Write-Host "  ServiceNow — Pre-Deploy | $env:ENVIRONMENT_NAME"
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        # ── 1. Load ServiceNow module ──────────────────────────────────────
+        Write-Host ":: Step 1 — Load ServiceNow module"
+        $snowRoot = "${{ github.workspace }}/.ci/.github/servicenow"
+        if (-not (Test-Path $snowRoot)) {
+          Write-Error "ServiceNow module not found at '$snowRoot'. Ensure ci-bootstrap has run and .ci/ is checked out."
+          exit 1
+        }
+        . "$snowRoot/Classes/ServiceNow.Class.ps1"
+        Get-ChildItem "$snowRoot/Private/*.ps1" | Sort-Object Name | ForEach-Object { . $_.FullName }
+        Get-ChildItem "$snowRoot/Public/*.ps1"  | Sort-Object Name | ForEach-Object { . $_.FullName }
+        Write-Host "  ✓ ServiceNow module loaded"
+
+        # ── 2. Set dynamic runtime environment variables ───────────────────
+        Write-Host ":: Step 2 — Set runtime environment variables"
+        $repo    = $env:GITHUB_REPOSITORY
+        $runNum  = $env:GITHUB_RUN_NUMBER
+        $envName = $env:ENVIRONMENT_NAME
+        $solList = $env:SOLUTION_LIST
+
+        if (-not $env:BUILD_UNIQUE_IDENTIFIER) {
+          $uid = "$repo-$runNum-$($env:GITHUB_RUN_ATTEMPT)"
+          [System.Environment]::SetEnvironmentVariable('BUILD_UNIQUE_IDENTIFIER', $uid)
+        }
+        if (-not $env:SERVICENOWSHORTDESCRIPTION) {
+          [System.Environment]::SetEnvironmentVariable('SERVICENOWSHORTDESCRIPTION',
+            "GHA Deploy: $envName | $repo | Run #$runNum")
+        }
+        if (-not $env:SERVICENOWDESCRIPTION) {
+          [System.Environment]::SetEnvironmentVariable('SERVICENOWDESCRIPTION',
+            "Automated Power Platform deployment to $envName.`n" +
+            "Solutions   : $solList`n" +
+            "Repository  : $repo`n" +
+            "Run         : #$runNum | Attempt: $($env:GITHUB_RUN_ATTEMPT)`n" +
+            "Actor       : $($env:GITHUB_ACTOR)`n" +
+            "Run URL     : $($env:GITHUB_SERVER_URL)/$repo/actions/runs/$($env:GITHUB_RUN_ID)")
+        }
+        if (-not $env:SERVICENOWRELEASEENVIRONMENT) {
+          [System.Environment]::SetEnvironmentVariable('SERVICENOWRELEASEENVIRONMENT', $envName.ToUpper())
+        }
+        if (-not $env:SERVICENOWPIPELINEMETADATA) {
+          [System.Environment]::SetEnvironmentVariable('SERVICENOWPIPELINEMETADATA',
+            "repo=$repo;run=$runNum;env=$envName;actor=$($env:GITHUB_ACTOR)")
+        }
+        if (-not $env:SERVICENOWCHANGETYPE)  { [System.Environment]::SetEnvironmentVariable('SERVICENOWCHANGETYPE',  'standard') }
+        if (-not $env:SERVICENOWRISKLEVEL)   { [System.Environment]::SetEnvironmentVariable('SERVICENOWRISKLEVEL',   'Low') }
+        if (-not $env:SERVICENOWIMPACTLEVEL) { [System.Environment]::SetEnvironmentVariable('SERVICENOWIMPACTLEVEL', '3 - Low') }
+
+        $desiredDay = if ($env:SERVICENOW_DESIRED_DAY) { $env:SERVICENOW_DESIRED_DAY } else { (Get-Date).DayOfWeek.ToString() }
+        Write-Host "  BUILD_UNIQUE_IDENTIFIER    : $env:BUILD_UNIQUE_IDENTIFIER"
+        Write-Host "  SERVICENOWSHORTDESCRIPTION : $env:SERVICENOWSHORTDESCRIPTION"
+        Write-Host "  SERVICENOWCHANGETYPE       : $env:SERVICENOWCHANGETYPE"
+        Write-Host "  Change window day          : $desiredDay"
+        Write-Host "  ✓ Runtime variables set"
+
+        # ── 3. Open ServiceNow change request ──────────────────────────────
+        Write-Host ":: Step 3 — Open ServiceNow change request"
+        New-ServiceNowChangeRequest -DesiredDayOfWeek $desiredDay
+        Write-Host "  ✓ Change request created"
+        Write-Host "    Number : $env:SNOW_CHANGE_REQUEST_NUMBER"
+        Write-Host "    sys_id : $env:SNOW_CHANGE_REQUEST_ID"
+        Write-Host "    Risk   : $env:SNOW_CHANGE_RISK_LEVEL"
+        # Persist to job env so post-deploy step can read them
+        "SNOW_CHANGE_REQUEST_NUMBER=$env:SNOW_CHANGE_REQUEST_NUMBER" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        "SNOW_CHANGE_REQUEST_ID=$env:SNOW_CHANGE_REQUEST_ID"         | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        "SNOW_CHANGE_RISK_LEVEL=$env:SNOW_CHANGE_RISK_LEVEL"         | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+        # ── 4. Attach audit trail (Solution Checker SARIF) ─────────────────
+        Write-Host ":: Step 4 — Attach audit trail"
+        $sarifPath = $env:SARIF_PATH
+        if ($sarifPath -and (Test-Path $sarifPath)) {
+          Add-ServiceNowAuditTrailArtifact -AuditTrailPath $sarifPath
+          Write-Host "  ✓ SARIF audit trail attached: $sarifPath"
+        } elseif ($sarifPath) {
+          Write-Warning "  SARIF path specified but not found at '$sarifPath' — skipping audit trail"
+        } else {
+          Write-Host "  Audit trail skipped — no sarif_path provided"
+        }
+
+        # ── 5. Set change window ───────────────────────────────────────────
+        Write-Host ":: Step 5 — Set ServiceNow change window"
+        $riskLevel = if ($env:SNOW_CHANGE_RISK_LEVEL) { $env:SNOW_CHANGE_RISK_LEVEL } else { $env:SERVICENOWRISKLEVEL }
+        Set-ServiceNowChangeWindow -DesiredDayOfWeek $desiredDay -RiskLevel $riskLevel
+        Write-Host "  ✓ Change window set (day: $desiredDay, risk: $riskLevel)"
+
+        # ── 6. Check conflict status ───────────────────────────────────────
+        Write-Host ":: Step 6 — Check ServiceNow conflict status"
+        Get-ServiceNowConflict
+        Write-Host "  ✓ No blocking conflicts found"
+
+        # ── 7. Request approval ────────────────────────────────────────────
+        Write-Host ":: Step 7 — Request ServiceNow approval"
+        Request-ServiceNowApproval
+        Write-Host "  ✓ Approval requested for: $env:SNOW_CHANGE_REQUEST_NUMBER"
+
+        # ── 8. Poll for approval status ────────────────────────────────────
+        Write-Host ":: Step 8 — Poll ServiceNow for approval status"
+        Get-ServiceNowApprovalStatus
+        Write-Host "  ✓ Change request APPROVED — proceeding with deployment"
+
+        Write-Host ""
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        Write-Host "  ✅ ServiceNow Pre-Deploy complete"
+        Write-Host "     CR : $env:SNOW_CHANGE_REQUEST_NUMBER"
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # ========================================================================
+    # POST-DEPLOY: Steps 12-14 — Find approvers, detect status, close CR
+    # Runs with if: always() so the CR is closed even when deployment fails.
+    # ========================================================================
+    - name: ServiceNow — Find Approvers + Detect Status + Close Change Request
+      if: ${{ always() && inputs.phase == 'post-deploy' && inputs.mock_deploy != 'true' }}
+      shell: pwsh
+      env:
+        ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+      run: |
+        Set-StrictMode -Version Latest
+        $ErrorActionPreference = 'Stop'
+
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        Write-Host "  ServiceNow — Post-Deploy | $env:ENVIRONMENT_NAME"
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        # Guard — if pre-deploy never opened a CR, nothing to close
+        if ([string]::IsNullOrWhiteSpace($env:SNOW_CHANGE_REQUEST_ID)) {
+          Write-Warning "SNOW_CHANGE_REQUEST_ID not set — pre-deploy may have failed before CR was opened."
+          Write-Warning "Skipping post-deploy ServiceNow closure."
+          exit 0
+        }
+        Write-Host "  Change request : $env:SNOW_CHANGE_REQUEST_NUMBER ($env:SNOW_CHANGE_REQUEST_ID)"
+
+        # Load ServiceNow module
+        $snowRoot = "${{ github.workspace }}/.ci/.github/servicenow"
+        . "$snowRoot/Classes/ServiceNow.Class.ps1"
+        Get-ChildItem "$snowRoot/Private/*.ps1" | Sort-Object Name | ForEach-Object { . $_.FullName }
+        Get-ChildItem "$snowRoot/Public/*.ps1"  | Sort-Object Name | ForEach-Object { . $_.FullName }
+
+        # ── 12. Find pipeline approvers (GitHub Environment approval API) ──
+        Write-Host ":: Step 12 — Find pipeline approvers"
+        $approverList = $env:GITHUB_ACTOR   # safe fallback
+        try {
+          $ghHeaders = @{
+            Authorization          = "Bearer $env:GITHUB_TOKEN"
+            Accept                 = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $approvalsUri  = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/approvals"
+          $approvalsResp = Invoke-RestMethod -Uri $approvalsUri -Headers $ghHeaders -ErrorAction SilentlyContinue
+          if ($approvalsResp -and $approvalsResp.Count -gt 0) {
+            $logins      = $approvalsResp | ForEach-Object { $_.user.login } | Select-Object -Unique
+            $approverList = $logins -join ', '
+          }
+        } catch {
+          Write-Warning "  Could not retrieve Environment approvers via GitHub API: $_ — using actor"
+        }
+        Write-Host "  Approvers: $approverList"
+        # Add approvers to SNOW work notes
+        try {
+          Add-ServiceNowChangeWorkNotes -Message "GitHub Actions approvers for $env:ENVIRONMENT_NAME deployment: $approverList (run #$env:GITHUB_RUN_NUMBER)"
+        } catch {
+          Write-Warning "  Could not add approver work note to SNOW: $_"
+        }
+
+        # ── 13. Detect deployment status ───────────────────────────────────
+        Write-Host ":: Step 13 — Detect deployment status"
+        # SNOW_DEPLOY_STATUS is written by the deploy-all-solutions deploy loop:
+        #   'success'  — all solutions imported and activated successfully
+        #   'failure'  — one or more solutions failed to import
+        #   'unknown'  — deploy step did not write status (unexpected failure)
+        $deployStatus    = if ($env:SNOW_DEPLOY_STATUS) { $env:SNOW_DEPLOY_STATUS } else { 'unknown' }
+        $deploySucceeded = $deployStatus -eq 'success'
+        Write-Host "  SNOW_DEPLOY_STATUS : $deployStatus"
+        Write-Host "  Deploy succeeded   : $deploySucceeded"
+
+        # ── 14. Close change request ───────────────────────────────────────
+        Write-Host ":: Step 14 — Close ServiceNow change request"
+        $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+        if ($deploySucceeded) {
+          $closeCode  = 'successful'
+          $closeNotes = "Deployment to $env:ENVIRONMENT_NAME completed SUCCESSFULLY.`n" +
+                        "Run #$env:GITHUB_RUN_NUMBER | Actor: $env:GITHUB_ACTOR | Approvers: $approverList`n" +
+                        "Run URL: $runUrl"
+        } else {
+          $closeCode  = 'unsuccessful'
+          $closeNotes = "Deployment to $env:ENVIRONMENT_NAME FAILED (status: $deployStatus).`n" +
+                        "Run #$env:GITHUB_RUN_NUMBER | Actor: $env:GITHUB_ACTOR`n" +
+                        "Review the GitHub Actions run for details:`n$runUrl"
+        }
+        Close-ServiceNowChangeRequest -CloseCode $closeCode -CloseNotes $closeNotes
+        Write-Host "  ✓ Change request closed"
+        Write-Host "    CR         : $env:SNOW_CHANGE_REQUEST_NUMBER"
+        Write-Host "    Close code : $closeCode"
+
+        Write-Host ""
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        Write-Host "  ✅ ServiceNow Post-Deploy complete"
+        Write-Host "     CR : $env:SNOW_CHANGE_REQUEST_NUMBER | Status: $closeCode"
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

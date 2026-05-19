@@ -27,6 +27,18 @@ inputs:
       Exports MULESOFT_CLIENT_ID and MULESOFT_CLIENT_SECRET into the job environment.
     required: false
     default: 'false'
+  servicenow_enabled:
+    description: >
+      Fetch ServiceNow credentials from AKV and export into the job environment.
+      Required when ServiceNow change management is active for the deployment.
+      Fetches the following AKV secrets:
+        snow-base-uri          → SERVICENOWMURI
+        snow-oauth-client-id   → SNOW_OAUTH_CLIENT_ID
+        snow-oauth-client-secret → SNOW_OAUTH_CLIENT_SECRET
+      Non-prod: optional — controlled by vars.SERVICENOW_ENABLED or workflow_dispatch.
+      Prod: always 'true' — mandatory, hardcoded in the caller, no user override.
+    required: false
+    default: 'false'
   azure_client_id:
     description: 'Azure service principal client ID (vars.AZURE_CLIENT_ID from the caller)'
     required: false
@@ -77,8 +89,9 @@ runs:
       shell: pwsh
       run: |
         $kvName          = '${{ inputs.azure_key_vault_name }}'
-        $jfrogEnabled    = '${{ inputs.jfrog_enabled }}'    -eq 'true'
-        $mulesoftEnabled = '${{ inputs.mulesoft_enabled }}' -eq 'true'
+        $jfrogEnabled    = '${{ inputs.jfrog_enabled }}'      -eq 'true'
+        $mulesoftEnabled = '${{ inputs.mulesoft_enabled }}'   -eq 'true'
+        $snowEnabled     = '${{ inputs.servicenow_enabled }}' -eq 'true'
 
         # ── Core Power Platform credentials (always fetched) ──────────────────
         $secrets = [ordered]@{
@@ -104,6 +117,20 @@ runs:
         if ($mulesoftEnabled) {
           $secrets['mulesoft-client-id']     = 'MULESOFT_CLIENT_ID'
           $secrets['mulesoft-client-secret'] = 'MULESOFT_CLIENT_SECRET'
+        }
+
+        # ── Optional: ServiceNow change management credentials ────────────
+        # Required when ServiceNow integration is active for the environment.
+        # Non-prod: optional (servicenow_enabled=true via vars or dispatch).
+        # Prod: always fetched — servicenow_enabled is hardcoded to 'true' by the caller.
+        # Store in AKV as:
+        #   snow-base-uri          → SERVICENOWMURI         (instance URL)
+        #   snow-oauth-client-id   → SNOW_OAUTH_CLIENT_ID
+        #   snow-oauth-client-secret → SNOW_OAUTH_CLIENT_SECRET
+        if ($snowEnabled) {
+          $secrets['snow-base-uri']            = 'SERVICENOWMURI'
+          $secrets['snow-oauth-client-id']     = 'SNOW_OAUTH_CLIENT_ID'
+          $secrets['snow-oauth-client-secret'] = 'SNOW_OAUTH_CLIENT_SECRET'
         }
 
         foreach ($entry in $secrets.GetEnumerator()) {

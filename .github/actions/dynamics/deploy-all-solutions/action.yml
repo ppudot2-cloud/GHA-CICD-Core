@@ -101,10 +101,45 @@ inputs:
     description: 'GitHub run attempt'
     required: false
     default: '1'
+  enable_servicenow:
+    description: >
+      Enable ServiceNow change management for this deployment.
+      When true: opens a CR before deployment, polls for approval, and closes the
+      CR after deployment. Must have servicenow_enabled=true in ci-bootstrap so
+      AKV credentials (SERVICENOWMURI, SNOW_OAUTH_CLIENT_ID/SECRET) are available.
+      Non-prod: optional — pass true to enable. Default false.
+      Prod: always 'true' — hardcoded by the caller, no user override.
+    required: false
+    default: 'false'
+  solution_list:
+    description: 'Comma-separated solution names — included in ServiceNow CR description'
+    required: false
+    default: ''
+  sarif_path:
+    description: >
+      Path to the Solution Checker SARIF report — attached as an audit trail
+      artifact to the ServiceNow change request (optional).
+    required: false
+    default: ''
 
 runs:
   using: composite
   steps:
+
+    # ── ServiceNow Pre-Deploy: Steps 1-8 (open CR → approval gate) ──────────
+    # Runs BEFORE PAC auth and solution deployment.
+    # Blocks the pipeline until the SNOW change request is approved.
+    # Non-prod: runs only when enable_servicenow=true.
+    # Prod: always runs (enable_servicenow is hardcoded 'true' by the caller).
+    - name: ServiceNow — Pre-Deploy (Open CR + Approval Gate)
+      if: ${{ inputs.enable_servicenow == 'true' }}
+      uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/servicenow-change@main
+      with:
+        phase:            pre-deploy
+        environment_name: ${{ inputs.environment_name }}
+        solution_list:    ${{ inputs.solution_list }}
+        sarif_path:       ${{ inputs.sarif_path }}
+        mock_deploy:      ${{ inputs.mock_deploy }}
 
     # ── Authenticate PAC CLI against the target environment ───────────────────
     - name: PAC auth — ${{ inputs.environment_name }}
@@ -622,16 +657,29 @@ runs:
         Write-Host ""
         Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         if ($failed.Count -gt 0) {
+          # Write deploy status for ServiceNow post-deploy closure
+          "SNOW_DEPLOY_STATUS=failure" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Error "Deploy to $envName FAILED for: $($failed -join ', ')"
           exit 1
         }
+        # Write deploy status for ServiceNow post-deploy closure
+        "SNOW_DEPLOY_STATUS=success" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
         Write-Host "  ✅ All $($solutions.Count) solution(s) deployed → $envName"
         Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-    # ── Upload backup artifacts (all solutions for this env, one artifact) ────
-    # Uploaded after the full loop so a single artifact covers all solutions.
-    # Named: backup-<env>-v<run_number>-<run_attempt>
-    # Rollback locates the correct backup by run_number.
+    # ── ServiceNow Post-Deploy: Steps 12-14 (approvers → status → close CR) ─
+    # Always runs (if: always()) so the CR is closed even when deployment fails.
+    # Reads SNOW_DEPLOY_STATUS written by the deploy loop above.
+    # Reads SNOW_CHANGE_REQUEST_ID written by the pre-deploy step.
+    # No-op if pre-deploy never ran (SNOW_CHANGE_REQUEST_ID will be empty).
+    - name: ServiceNow — Post-Deploy (Find Approvers + Detect Status + Close CR)
+      if: ${{ always() && inputs.enable_servicenow == 'true' }}
+      uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/servicenow-change@main
+      with:
+        phase:            post-deploy
+        environment_name: ${{ inputs.environment_name }}
+        mock_deploy:      ${{ inputs.mock_deploy }}
+
     # ── Upload backup artifacts (all solutions for this env, one artifact) ────
     # One artifact per environment per run — rollback downloads this and locates
     # the specific solution ZIP by filename pattern: {SolutionName}_{Env}_backup.zip
