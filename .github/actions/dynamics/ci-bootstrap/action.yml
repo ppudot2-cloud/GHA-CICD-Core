@@ -9,7 +9,7 @@
 #       Callers must expose GHA_CORE_PAT via env: GHA_CORE_PAT on the step.
 # =============================================================================
 name: 'CI Bootstrap'
-description: 'Checkout repos, Azure OIDC login, fetch AKV secrets, merge global+project variables'
+description: 'Checkout repos, Azure OIDC login, fetch AKV secrets, merge global+project variables, register JFrog PS repo'
 
 inputs:
   mock_deploy:
@@ -17,7 +17,14 @@ inputs:
     required: false
     default: 'false'
   jfrog_enabled:
-    description: 'Also fetch jfrog-api-key from AKV (set true when jfrog_url is provided)'
+    description: 'Fetch jfrog-api-key from AKV and register JFrog as the default PowerShell module repository'
+    required: false
+    default: 'false'
+  mulesoft_enabled:
+    description: >
+      Fetch Mulesoft credentials from AKV (mulesoft-client-id, mulesoft-client-secret).
+      Set true for environments where solutions use Mulesoft connectors.
+      Exports MULESOFT_CLIENT_ID and MULESOFT_CLIENT_SECRET into the job environment.
     required: false
     default: 'false'
   azure_client_id:
@@ -33,7 +40,11 @@ inputs:
     required: false
     default: ''
   azure_key_vault_name:
-    description: 'Azure Key Vault name (vars.AZURE_KEY_VAULT_NAME from the caller)'
+    description: >
+      Azure Key Vault name (vars.AZURE_KEY_VAULT_NAME from the caller).
+      Set this as a GitHub Environment-level variable to use a different KV per environment
+      (e.g. non-prod KV for Dev/Intg/UAT/FRS/Perf, prod KV for Prod).
+      One service principal per KV boundary is the recommended pattern.
     required: false
     default: ''
 
@@ -65,14 +76,36 @@ runs:
       if: ${{ inputs.mock_deploy != 'true' }}
       shell: pwsh
       run: |
-        $kvName       = '${{ inputs.azure_key_vault_name }}'
-        $jfrogEnabled = '${{ inputs.jfrog_enabled }}' -eq 'true'
+        $kvName          = '${{ inputs.azure_key_vault_name }}'
+        $jfrogEnabled    = '${{ inputs.jfrog_enabled }}'    -eq 'true'
+        $mulesoftEnabled = '${{ inputs.mulesoft_enabled }}' -eq 'true'
+
+        # ── Core Power Platform credentials (always fetched) ──────────────────
         $secrets = [ordered]@{
           'pp-app-id'        = 'PP_APP_ID'
           'pp-client-secret' = 'PP_CLIENT_SECRET'
           'pp-tenant-id'     = 'PP_TENANT_ID'
         }
+
+        # ── Optional: JFrog API key ───────────────────────────────────────────
+        # Stored in KV as 'jfrog-api-key'. Required when jfrog_url is set so
+        # the build/deploy jobs can authenticate to Artifactory for artifact
+        # uploads, downloads, and PS module installs.
         if ($jfrogEnabled) { $secrets['jfrog-api-key'] = 'JFROG_TOKEN' }
+
+        # ── Optional: Mulesoft connector credentials ──────────────────────────
+        # Solutions using Mulesoft connection references need the Mulesoft
+        # client ID and secret to be injected via deployment settings tokens.
+        # Store these in the per-environment KV as:
+        #   mulesoft-client-id     → MULESOFT_CLIENT_ID
+        #   mulesoft-client-secret → MULESOFT_CLIENT_SECRET
+        # Reference them in deployment-settings JSON as #{MULESOFT_CLIENT_ID}#
+        # and #{MULESOFT_CLIENT_SECRET}#.
+        if ($mulesoftEnabled) {
+          $secrets['mulesoft-client-id']     = 'MULESOFT_CLIENT_ID'
+          $secrets['mulesoft-client-secret'] = 'MULESOFT_CLIENT_SECRET'
+        }
+
         foreach ($entry in $secrets.GetEnumerator()) {
           $value = az keyvault secret show `
             --vault-name $kvName --name $entry.Key --query value -o tsv 2>&1
@@ -91,3 +124,52 @@ runs:
         pwsh .ci/.github/scripts/dynamics/Merge-Variables.ps1 `
           -GlobalVarsPath  ".ci/.github/variables/dynamics/global-vars.yml" `
           -ProjectVarsPath ".github/config/project-vars.yml"
+
+    # ── Register JFrog as the default PowerShell module repository ────────────
+    # Agents in air-gapped / restricted-network environments cannot reach the
+    # public PSGallery. This step unregisters PSGallery and registers JFrog
+    # Artifactory (NuGet v2 feed) so that Install-Module calls in subsequent
+    # steps resolve from JFrog. JFrog's remote-repository proxy caches modules
+    # the first time they are requested, so no internet access from the agent
+    # is needed after the first run.
+    #
+    # Requires: JFROG_TOKEN and JFROG_URL + JFROG_REPO in env (set above and
+    # by Merge-Variables.ps1). Skipped in mock mode and when jfrog_enabled=false.
+    - name: Register JFrog as default PS module repository
+      if: ${{ inputs.mock_deploy != 'true' && inputs.jfrog_enabled == 'true' }}
+      shell: pwsh
+      run: |
+        $jfrogUrl  = $env:JFROG_URL
+        $jfrogRepo = $env:JFROG_REPO
+        $jfrogToken = $env:JFROG_TOKEN
+
+        if (-not $jfrogUrl -or -not $jfrogRepo -or -not $jfrogToken) {
+          Write-Warning "JFROG_URL, JFROG_REPO, or JFROG_TOKEN not set — skipping PS repository registration"
+          exit 0
+        }
+
+        # NuGet v2 feed URL for PowerShell modules in Artifactory
+        $feedUrl = "$jfrogUrl/api/nuget/v2/$jfrogRepo"
+
+        # Unregister PSGallery — agents have no internet access
+        if (Get-PSRepository -Name "PSGallery" -ErrorAction SilentlyContinue) {
+          Unregister-PSRepository -Name "PSGallery"
+          Write-Host "  ✓ PSGallery unregistered (no internet access on agent)"
+        }
+
+        # Register JFrog NuGet feed as trusted PS repository
+        $cred = New-Object PSCredential(
+          "artifactory",
+          (ConvertTo-SecureString $jfrogToken -AsPlainText -Force)
+        )
+        if (Get-PSRepository -Name "JFrog" -ErrorAction SilentlyContinue) {
+          Unregister-PSRepository -Name "JFrog"
+        }
+        Register-PSRepository `
+          -Name             "JFrog" `
+          -SourceLocation   $feedUrl `
+          -PublishLocation  $feedUrl `
+          -InstallationPolicy Trusted `
+          -Credential       $cred
+        Write-Host "  ✓ JFrog registered as trusted PS repository: $feedUrl"
+        Write-Host "✅ PowerShell module source: JFrog ($feedUrl)"

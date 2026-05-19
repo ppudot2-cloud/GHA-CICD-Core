@@ -406,59 +406,150 @@ runs:
               Write-Host "  ✓ Customizations published"
             }
 
-            # ── 10. Activate Cloud Flows ───────────────────────────────────────
-            Write-Host "[$name] Step 11/14 — Activate Cloud Flows"
+            # ── 10. Activate Flows and Classic Workflows ──────────────────────
+            # TWO activation paths run in sequence:
+            #   A. Power Automate cloud flows  — identified by .json files in the
+            #      solution's Workflows folder. Activated via PAC CLI flow enable.
+            #   B. Classic Dynamics 365 workflows — identified by .xaml files in
+            #      the solution's Workflows folder. Activated via Dataverse Web API
+            #      PATCH (statecode=1, statuscode=2).
+            #
+            # The solution ZIP is extracted to a temp folder first so both paths
+            # can read the exact workflow/flow definitions shipped in this artifact
+            # rather than querying the environment (which may have extras).
+            Write-Host "[$name] Step 11/14 — Extract solution + activate flows & classic workflows"
             if ($skipImport) {
               Write-Host "  Activate skipped — import skipped (version already current)"
             } elseif ($env:ACTIVATE_FLOWS -ne 'true') {
               Write-Host "  activate_flows=false — skipping"
             } elseif ($isMock) {
-              Write-Host "  [MOCK] Cloud Flow activation simulated" -ForegroundColor Cyan
+              Write-Host "  [MOCK] Flow + classic workflow activation simulated" -ForegroundColor Cyan
             } else {
-              Write-Host "  Fetching Cloud Flows in solution '$name'..."
-              $flowListRaw = pac flow list --solution-name $name --environment $envUrl --json 2>&1
-              try {
-                $flows = $flowListRaw | ConvertFrom-Json
-                if ($flows -and $flows.Count -gt 0) {
-                  Write-Host "  Found $($flows.Count) flow(s) — activating..."
-                  $activated = 0
-                  $skipped   = 0
-                  foreach ($flow in $flows) {
-                    # PAC CLI uses different property casing across versions
-                    $flowId   = if ($flow.FlowId)      { $flow.FlowId }      `
-                                elseif ($flow.flowId)  { $flow.flowId }      `
-                                elseif ($flow.Id)      { $flow.Id }          `
-                                else                   { $flow.id }
-                    $flowName = if ($flow.DisplayName) { $flow.DisplayName } `
-                                elseif ($flow.displayName) { $flow.displayName } `
-                                else { $flowId }
-                    $state    = if ($flow.State)       { $flow.State }       `
-                                elseif ($flow.state)   { $flow.state }       `
-                                else { '' }
+              # ── Extract solution ZIP ────────────────────────────────────────
+              $extractDir = "$outDir/_extracted"
+              if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+              New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
 
+              # Prefer managed ZIP (same content for workflows); fall back to unmanaged
+              $zipToExtract = $managedZip
+              if (-not (Test-Path $zipToExtract)) {
+                $zipToExtract = (Get-ChildItem -Path $outDir -Filter "*_unmanaged.zip" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName)
+              }
+
+              if (-not $zipToExtract -or -not (Test-Path $zipToExtract)) {
+                Write-Warning "  No solution ZIP found at '$outDir' — skipping flow activation"
+              } else {
+                Expand-Archive -LiteralPath $zipToExtract -DestinationPath $extractDir -Force
+                Write-Host "  ✓ Extracted: $zipToExtract → $extractDir"
+
+                $workflowsDir = Join-Path $extractDir "Workflows"
+
+                # ── A. Power Automate cloud flows (.json) ───────────────────
+                Write-Host "  [A] Power Automate cloud flows (.json)"
+                $flowFiles = if (Test-Path $workflowsDir) {
+                  Get-ChildItem -Path $workflowsDir -Filter "*.json" -ErrorAction SilentlyContinue
+                } else { @() }
+
+                if ($flowFiles.Count -gt 0) {
+                  Write-Host "    Found $($flowFiles.Count) cloud flow definition(s)"
+                  $activatedFlows = 0; $skippedFlows = 0
+                  foreach ($ff in $flowFiles) {
+                    # Filename pattern: {DisplayName}_{flowid}.json
+                    # Extract GUID from the end of the filename (before .json)
+                    $flowId = $null
+                    if ($ff.BaseName -match '([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$') {
+                      $flowId = $matches[1]
+                    }
                     if (-not $flowId) {
-                      Write-Warning "    Could not determine FlowId for flow: $($flow | ConvertTo-Json -Compress)"
+                      Write-Warning "    Could not extract flow ID from filename: $($ff.Name) — skipping"
+                      continue
+                    }
+                    Write-Host "    ▶ Enabling flow: $($ff.BaseName)"
+                    try {
+                      pac flow enable --flow-id $flowId --environment $envUrl
+                      $activatedFlows++
+                    } catch {
+                      Write-Warning "    Could not enable flow $flowId`: $_ (may already be active)"
+                      $skippedFlows++
+                    }
+                  }
+                  Write-Host "    ✓ Cloud flows: $activatedFlows enabled, $skippedFlows skipped/already active"
+                } else {
+                  Write-Host "    No cloud flow files (.json) found in solution"
+                }
+
+                # ── B. Classic Dynamics 365 workflows (.xaml) ───────────────
+                Write-Host "  [B] Classic Dynamics 365 workflows (.xaml)"
+                $xamlFiles = if (Test-Path $workflowsDir) {
+                  Get-ChildItem -Path $workflowsDir -Filter "*.xaml" -ErrorAction SilentlyContinue
+                } else { @() }
+
+                if ($xamlFiles.Count -gt 0) {
+                  Write-Host "    Found $($xamlFiles.Count) classic workflow definition(s)"
+
+                  # Get bearer token for Dataverse Web API calls
+                  # Uses the same PP service principal credentials fetched from AKV
+                  $tokenUrl  = "https://login.microsoftonline.com/$env:PP_TENANT_ID/oauth2/v2.0/token"
+                  $tokenBody = @{
+                    grant_type    = 'client_credentials'
+                    client_id     = $env:PP_APP_ID
+                    client_secret = $env:PP_CLIENT_SECRET
+                    scope         = "$envUrl/.default"
+                  }
+                  $tokenResp = Invoke-RestMethod -Uri $tokenUrl -Method POST -Body $tokenBody
+                  $bearerToken = $tokenResp.access_token
+                  Write-Host "    ✓ Bearer token acquired for Dataverse Web API"
+
+                  $apiHeaders = @{
+                    Authorization    = "Bearer $bearerToken"
+                    'OData-MaxVersion' = '4.0'
+                    'OData-Version'    = '4.0'
+                    Accept           = 'application/json'
+                    'Content-Type'   = 'application/json'
+                  }
+                  $activatedWf = 0; $skippedWf = 0
+
+                  foreach ($xf in $xamlFiles) {
+                    # Filename pattern: {DisplayName}_{workflowid}.xaml
+                    $wfId = $null
+                    if ($xf.BaseName -match '([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$') {
+                      $wfId = $matches[1]
+                    }
+                    if (-not $wfId) {
+                      Write-Warning "    Could not extract workflow ID from filename: $($xf.Name) — skipping"
                       continue
                     }
 
-                    if ($state -ieq 'Active' -or $state -ieq 'Enabled') {
-                      Write-Host "    ⏭ Already active: $flowName"
-                      $skipped++
-                    } else {
-                      Write-Host "    ▶ Enabling: $flowName ($flowId)"
-                      pac flow enable --flow-id $flowId --environment $envUrl
-                      $activated++
+                    Write-Host "    Checking: $($xf.BaseName)"
+                    try {
+                      # Query current state before patching
+                      $checkUrl  = "$envUrl/api/data/v9.2/workflows($wfId)?`$select=name,statecode,statuscode"
+                      $wfRecord  = Invoke-RestMethod -Uri $checkUrl -Headers $apiHeaders -Method GET
+                      $stateName = if ($wfRecord.statecode -eq 1) { 'Active' } else { "Inactive (statecode=$($wfRecord.statecode))" }
+                      Write-Host "      Current state: $stateName"
+
+                      if ($wfRecord.statecode -eq 1) {
+                        Write-Host "      ⏭ Already active: $($wfRecord.name)"
+                        $skippedWf++
+                      } else {
+                        # Activate: statecode=1 (Active), statuscode=2 (Activated)
+                        $patchUrl  = "$envUrl/api/data/v9.2/workflows($wfId)"
+                        $patchBody = '{"statecode":1,"statuscode":2}' | ConvertFrom-Json | ConvertTo-Json
+                        Invoke-RestMethod -Uri $patchUrl -Headers $apiHeaders -Method PATCH -Body $patchBody | Out-Null
+                        Write-Host "      ▶ Activated: $($wfRecord.name)"
+                        $activatedWf++
+                      }
+                    } catch {
+                      Write-Warning "      Failed to activate workflow $wfId`: $_"
                     }
                   }
-                  Write-Host "  ✓ Activated $activated flow(s), $skipped already active"
+                  Write-Host "    ✓ Classic workflows: $activatedWf activated, $skippedWf already active"
                 } else {
-                  Write-Host "  No Cloud Flows found in solution '$name' — nothing to activate"
+                  Write-Host "    No classic workflow files (.xaml) found in solution"
                 }
-              } catch {
-                Write-Warning "  Could not parse flow list — activating without listing:"
-                Write-Warning "  Raw output: $flowListRaw"
-                # Fallback: try a bulk enable without listing
-                Write-Warning "  Skipping flow activation for this solution — review manually"
+
+                # Cleanup extraction folder
+                Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
               }
             }
 
