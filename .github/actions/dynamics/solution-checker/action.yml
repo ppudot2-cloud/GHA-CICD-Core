@@ -52,7 +52,7 @@ runs:
       run: |
         $destDir = "${{ inputs.out_dir }}/solution-checker"
         New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-        $searchRoots = @($env:RUNNER_TEMP, "${{ github.workspace }}", ".")
+        $searchRoots = @($env:RUNNER_TEMP, "$env:GITHUB_WORKSPACE", ".")
         $found = @()
         foreach ($root in $searchRoots) {
           if ($root -and (Test-Path $root)) {

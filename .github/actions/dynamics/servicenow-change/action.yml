@@ -107,7 +107,7 @@ runs:
 
         # ── 1. Load ServiceNow module ──────────────────────────────────────
         Write-Host ":: Step 1 — Load ServiceNow module"
-        $snowRoot = "${{ github.workspace }}/.ci/.github/servicenow"
+        $snowRoot = "$env:GITHUB_WORKSPACE/.ci/.github/servicenow"
         if (-not (Test-Path $snowRoot)) {
           Write-Error "ServiceNow module not found at '$snowRoot'. Ensure reveille has run and .ci/ is checked out."
           exit 1
@@ -236,7 +236,7 @@ runs:
         Write-Host "  Change request : $env:SNOW_CHANGE_REQUEST_NUMBER ($env:SNOW_CHANGE_REQUEST_ID)"
 
         # Load ServiceNow module
-        $snowRoot = "${{ github.workspace }}/.ci/.github/servicenow"
+        $snowRoot = "$env:GITHUB_WORKSPACE/.ci/.github/servicenow"
         . "$snowRoot/Classes/ServiceNow.Class.ps1"
         Get-ChildItem "$snowRoot/Private/*.ps1" | Sort-Object Name | ForEach-Object { . $_.FullName }
         Get-ChildItem "$snowRoot/Public/*.ps1"  | Sort-Object Name | ForEach-Object { . $_.FullName }

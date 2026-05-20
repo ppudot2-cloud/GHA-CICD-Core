@@ -65,7 +65,7 @@ runs:
       if: ${{ inputs.data_schema_file != '' && inputs.mock_deploy == 'true' }}
       shell: pwsh
       run: |
-        $scriptPath = "${{ github.action_path }}/../../../../.github/scripts/dynamics/Export-ConfigDataSim.ps1"
+        $scriptPath = "$env:GITHUB_ACTION_PATH/../../../../.github/scripts/dynamics/Export-ConfigDataSim.ps1"
         if (-not (Test-Path $scriptPath)) {
           $scriptPath = ".ci/.github/scripts/dynamics/Export-ConfigDataSim.ps1"
         }

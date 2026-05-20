@@ -77,7 +77,7 @@ runs:
         & $scriptPath `
           -Action       "upload" `
           -SolutionName "${{ inputs.solution_name }}" `
-          -RepoName     "${{ github.repository }}" `
+          -RepoName     "$env:GITHUB_REPOSITORY" `
           -LocalPath    $localPath `
           -JFrogUrl     "${{ inputs.jfrog_url }}" `
           -JFrogRepo    "${{ inputs.jfrog_repo }}" `
