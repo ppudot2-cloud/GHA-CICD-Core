@@ -73,7 +73,19 @@
 name: Credential Health Check
 
 on:
+  # ── Scheduled: monthly credential expiry sweep ──────────────────────────────
+  # Runs on the 1st of every month at 08:00 UTC.
+  # checks_config and warning_days are read from repository variables so the
+  # schedule trigger needs no inputs — configure them once in:
+  #   Settings → Secrets and variables → Variables
+  #     HEALTH_CHECK_CONFIG   — JSON array (same schema as workflow_dispatch input)
+  #     HEALTH_CHECK_WARN_DAYS — integer, default 30
+  schedule:
+    - cron: '0 8 1 * *'   # monthly — 1st of every month at 08:00 UTC
+
   # ── Standalone: run manually from the Actions tab ───────────────────────────
+  # Useful for on-demand audits or testing a new checks_config value before
+  # saving it as a repository variable.
   workflow_dispatch:
     inputs:
       checks_config:
@@ -81,7 +93,7 @@ on:
           JSON array of check contexts. Each entry: { "name", "azure_client_id",
           "azure_tenant_id", "azure_subscription_id", "key_vault_name",
           "app_registration_ids": [...] }
-        required: true
+        required: false
         type: string
 
       warning_days:
@@ -147,8 +159,14 @@ jobs:
         id: collect
         shell: python3 {0}
         env:
-          CHECKS_CONFIG:  ${{ inputs.checks_config }}
-          WARNING_DAYS:   ${{ inputs.warning_days || '30' }}
+          # Input resolution priority:
+          #   1. workflow_dispatch / workflow_call inputs (manual or caller-supplied)
+          #   2. Repository variables HEALTH_CHECK_CONFIG / HEALTH_CHECK_WARN_DAYS
+          #      (used automatically by the schedule trigger which has no inputs)
+          # Set these variables once in:
+          #   GHA-Core → Settings → Secrets and variables → Variables
+          CHECKS_CONFIG:  ${{ inputs.checks_config || vars.HEALTH_CHECK_CONFIG }}
+          WARNING_DAYS:   ${{ inputs.warning_days || vars.HEALTH_CHECK_WARN_DAYS || '30' }}
           # GitHub OIDC endpoint — needed to mint per-context tokens
           ACTIONS_ID_TOKEN_REQUEST_URL:   ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
