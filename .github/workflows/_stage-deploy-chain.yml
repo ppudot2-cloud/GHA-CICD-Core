@@ -104,6 +104,26 @@ on:
         required: true
         type: string
 
+      azure_client_id:
+        description: 'Azure service principal client ID — passed from the caller repo (vars.AZURE_CLIENT_ID)'
+        required: false
+        type: string
+        default: ''
+      azure_tenant_id:
+        description: 'Azure tenant ID — passed from the caller repo (vars.AZURE_TENANT_ID)'
+        required: false
+        type: string
+        default: ''
+      azure_subscription_id:
+        description: 'Azure subscription ID — passed from the caller repo (vars.AZURE_SUBSCRIPTION_ID)'
+        required: false
+        type: string
+        default: ''
+      azure_key_vault_name:
+        description: 'Azure Key Vault name — passed from the caller repo (vars.AZURE_KEY_VAULT_NAME)'
+        required: false
+        type: string
+        default: ''
       # ── Per-environment config inputs ─────────────────────────────────────
       # Each is a compact JSON object — see header comment for field reference.
       dev_config:
@@ -150,10 +170,10 @@ jobs:
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
-          azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
-          azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
-          azure_subscription_id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          azure_key_vault_name:   ${{ vars.AZURE_KEY_VAULT_NAME }}
+          azure_client_id:        ${{ inputs.azure_client_id }}
+          azure_tenant_id:        ${{ inputs.azure_tenant_id }}
+          azure_subscription_id:  ${{ inputs.azure_subscription_id }}
+          azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
         uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
@@ -204,10 +224,10 @@ jobs:
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
-          azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
-          azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
-          azure_subscription_id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          azure_key_vault_name:   ${{ vars.AZURE_KEY_VAULT_NAME }}
+          azure_client_id:        ${{ inputs.azure_client_id }}
+          azure_tenant_id:        ${{ inputs.azure_tenant_id }}
+          azure_subscription_id:  ${{ inputs.azure_subscription_id }}
+          azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
         uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
@@ -258,10 +278,10 @@ jobs:
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
-          azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
-          azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
-          azure_subscription_id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          azure_key_vault_name:   ${{ vars.AZURE_KEY_VAULT_NAME }}
+          azure_client_id:        ${{ inputs.azure_client_id }}
+          azure_tenant_id:        ${{ inputs.azure_tenant_id }}
+          azure_subscription_id:  ${{ inputs.azure_subscription_id }}
+          azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
         uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
@@ -312,10 +332,10 @@ jobs:
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
-          azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
-          azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
-          azure_subscription_id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          azure_key_vault_name:   ${{ vars.AZURE_KEY_VAULT_NAME }}
+          azure_client_id:        ${{ inputs.azure_client_id }}
+          azure_tenant_id:        ${{ inputs.azure_tenant_id }}
+          azure_subscription_id:  ${{ inputs.azure_subscription_id }}
+          azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
         uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
@@ -366,10 +386,10 @@ jobs:
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
-          azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
-          azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
-          azure_subscription_id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          azure_key_vault_name:   ${{ vars.AZURE_KEY_VAULT_NAME }}
+          azure_client_id:        ${{ inputs.azure_client_id }}
+          azure_tenant_id:        ${{ inputs.azure_tenant_id }}
+          azure_subscription_id:  ${{ inputs.azure_subscription_id }}
+          azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
         uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
@@ -427,10 +447,10 @@ jobs:
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
-          azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
-          azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
-          azure_subscription_id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          azure_key_vault_name:   ${{ vars.AZURE_KEY_VAULT_NAME }}
+          azure_client_id:        ${{ inputs.azure_client_id }}
+          azure_tenant_id:        ${{ inputs.azure_tenant_id }}
+          azure_subscription_id:  ${{ inputs.azure_subscription_id }}
+          azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
         uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
