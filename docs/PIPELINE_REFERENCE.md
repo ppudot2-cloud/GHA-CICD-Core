@@ -185,6 +185,10 @@ setup → export (matrix, max-parallel:1) → create-pr
 
 These workflows are called via `uses: ppudot2-cloud/GHA-Core/.github/workflows/{name}@main`. They must live in `.github/workflows/` root (GitHub constraint — subdirectories not supported for reusable workflows).
 
+> **Architecture principle — Azure identity inputs**
+>
+> GHA-Core is a shared library and **never reads `vars.AZURE_*` directly**. Every reusable workflow that needs Azure OIDC authentication declares `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, and `azure_key_vault_name` as explicit `workflow_call` inputs. The caller (GHA-Dynamics) reads its own `vars.AZURE_*` repository variables and passes them as `with:` inputs. This keeps GHA-Core free of project-specific configuration and ensures that `vars.*` always resolve from the repo that owns them.
+
 ### `_stage-export.yml`
 
 **Path:** `.github/workflows/_stage-export.yml`
@@ -192,6 +196,10 @@ These workflows are called via `uses: ppudot2-cloud/GHA-Core/.github/workflows/{
 **Purpose:** Export stage — exports solutions from sandbox and commits to the feature branch. Supports a `skip_export` input.
 
 Supports two modes: **normal** (exports from sandbox, creates `feature/pipeline-{N}` branch) and **skip_export** (source already committed; the commit job only writes `pipeline-context.json` to the existing branch). Outputs the feature branch name for downstream jobs.
+
+**Key inputs:** `matrix`, `solution_list`, `source_environment_url`, `mock_deploy`, `skip_export`, `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`
+
+**Outputs:** `feature_branch`
 
 ---
 
@@ -201,7 +209,7 @@ Supports two modes: **normal** (exports from sandbox, creates `feature/pipeline-
 **Called by:** `build-and-deploy.yml`, `pr-validation.yml`
 **Purpose:** Build stage — fans out to `_job-build.yml` using a matrix strategy, one job per solution. Runs in parallel.
 
-**Key inputs:** `solutions_json` (matrix), `mock_deploy`, `jfrog_url`, `jfrog_repo`, `use_exported_source`
+**Key inputs:** `matrix`, `mock_deploy`, `jfrog_url`, `jfrog_repo`, `use_exported_source`, `checker_error_level`, `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`
 
 **Outputs:** Per-solution: `solution_version`, `artifact_name`, `unmanaged_zip`, `managed_zip`
 
@@ -213,7 +221,7 @@ Supports two modes: **normal** (exports from sandbox, creates `feature/pipeline-
 **Called by:** `_stage-build.yml` (one instance per solution in the matrix)
 **Purpose:** Single-solution build job. Orchestrates: reveille → pac-install → optional artifact download → pack-solution → solution-checker → export-config-data → upload artifact → jfrog-upload → write summary.
 
-**Key inputs:** `solution_name`, `solution_source_folder`, `use_exported_source`, `checker_error_level`, `data_schema_file`, `source_environment_url`, `mock_deploy`, `jfrog_url`, `jfrog_repo`
+**Key inputs:** `solution_name`, `solution_source_folder`, `use_exported_source`, `checker_error_level`, `data_schema_file`, `source_environment_url`, `mock_deploy`, `jfrog_url`, `jfrog_repo`, `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`
 
 **Outputs:** `solution_version`, `artifact_name`, `unmanaged_zip`, `managed_zip`, `checker_artifact_name`
 
@@ -222,12 +230,12 @@ Supports two modes: **normal** (exports from sandbox, creates `feature/pipeline-
 ### `_stage-deploy-chain.yml`
 
 **Path:** `.github/workflows/_stage-deploy-chain.yml`
-**Called by:** `build-and-deploy.yml` (or any caller that needs multi-environment deployment)
-**Purpose:** Parallel deploy across all environments (Dev, Intg, UAT, FRS, Perf) with individual GitHub Environment approval gates. Prod is sequential after UAT (needs: deploy-uat).
-
-Each environment has its own explicit job (not a matrix) so GitHub renders a distinct "Waiting for review" gate node per environment. All non-Prod environments start simultaneously — approve all at once or selectively. Prod only starts after UAT succeeds.
+**Called by:** Any caller that needs multi-environment deployment with approval gates
+**Purpose:** Parallel deploy across all environments (Dev, Intg, UAT, FRS, Perf, Prod) with individual GitHub Environment approval gates. Each environment has its own explicit job so GitHub renders a distinct "Waiting for review" gate node. All gates open simultaneously — approve all at once or selectively.
 
 Accepts an `environments` filter input (comma-separated) to deploy only a subset of environments. Per-environment config is passed as compact JSON objects (`dev_config`, `intg_config`, etc.).
+
+**Key inputs:** `matrix`, `mock_deploy`, `environments`, `source_run_id`, `base_solutions`, `jfrog_url`, `jfrog_repo`, `run_number`, `run_attempt`, `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`, plus per-env config objects (`dev_config`, `intg_config`, `uat_config`, `frs_config`, `perf_config`, `prod_config`)
 
 ---
 
@@ -261,12 +269,16 @@ Steps performed:
 | `jfrog_enabled` | `false` | Fetch `jfrog-api-key` from AKV; register JFrog as PS module source |
 | `mulesoft_enabled` | `false` | Fetch Mulesoft credentials from AKV (for solutions using Mulesoft connectors) |
 | `servicenow_enabled` | `false` | Fetch ServiceNow credentials from AKV. Driven by `vars.SERVICENOW_ENABLED` on each environment. |
-| `azure_client_id` | `''` | `vars.AZURE_CLIENT_ID` — OIDC App Registration client ID |
-| `azure_tenant_id` | `''` | `vars.AZURE_TENANT_ID` — Azure AD tenant |
-| `azure_subscription_id` | `''` | `vars.AZURE_SUBSCRIPTION_ID` |
-| `azure_key_vault_name` | `''` | `vars.AZURE_KEY_VAULT_NAME` — set per environment for separate KVs |
+| `azure_client_id` | `''` | OIDC App Registration client ID — passed by the caller from `vars.AZURE_CLIENT_ID` |
+| `azure_tenant_id` | `''` | Azure AD tenant ID — passed by the caller from `vars.AZURE_TENANT_ID` |
+| `azure_subscription_id` | `''` | Azure subscription ID — passed by the caller from `vars.AZURE_SUBSCRIPTION_ID` |
+| `azure_key_vault_name` | `''` | Key Vault name — passed by the caller from `vars.AZURE_KEY_VAULT_NAME`; set per environment if using separate KVs for non-prod/prod |
 
-> Composite actions cannot access `${{ secrets.* }}`. The caller exposes `GHA_CORE_PAT` via `env: GHA_CORE_PAT` on the step.
+> **Composite action limitation:** composite actions cannot access `${{ secrets.* }}` or `${{ vars.* }}` from the caller's context directly. The caller must:
+> - Expose `GHA_CORE_PAT` via `env: GHA_CORE_PAT` on the step
+> - Pass `vars.AZURE_*` values explicitly as `azure_*` inputs
+>
+> This is by design — GHA-Core owns no project variables. All identity configuration lives in the caller repo.
 
 ---
 

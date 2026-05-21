@@ -13,6 +13,40 @@ Callers (GHA-Dynamics repos) should pin to a release tag. See [CONTRIBUTING.md](
 
 Changes on `main` not yet tagged as a release.
 
+### Changed
+
+**Architecture — Azure identity inputs now passed explicitly from callers**
+
+All four Azure identity values (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_KEY_VAULT_NAME`) are no longer read via `vars.*` inside GHA-Core reusable workflows. They are now declared as explicit `workflow_call` inputs (`azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`) on every workflow that calls `reveille`.
+
+Affected workflows: `_stage-export.yml`, `_stage-build.yml`, `_job-build.yml`, `_stage-deploy-chain.yml`.
+
+**Why:** `vars.*` in a reusable workflow resolves from the repo that *defines* the workflow (GHA-Core), not the repo that calls it. Storing these values in GHA-Core would couple the shared library to a specific project's Azure identity — violating the design principle that GHA-Core is project-agnostic.
+
+**Migration for new callers:** Pass these four inputs explicitly in every `with:` block that calls an affected reusable:
+```yaml
+with:
+  azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
+  azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
+  azure_subscription_id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  azure_key_vault_name:   ${{ vars.AZURE_KEY_VAULT_NAME }}
+```
+GHA-Dynamics `build-and-deploy.yml` already includes these. Any other caller repo must be updated accordingly.
+
+### Added
+
+**`reveille` — OIDC pre-login diagnostics**
+
+Added a validation step before `azure/login@v2` that checks all three Azure identity inputs are non-empty and decodes the OIDC JWT to print the `sub` (subject) and `iss` (issuer) claims. Surfaces the exact federated credential subject needed to diagnose `AADSTS700016` ("Application not found") and `AADSTS70021` ("No matching federated identity record") without requiring Azure AD audit log access.
+
+**Solution Checker — deterministic SARIF path and explicit artifact upload**
+
+Replaced the `microsoft/powerplatform-actions/check-solution@v1` wrapper with direct `pac solution check --outputDirectory`. SARIF reports are written to a fixed path (`out/<SolutionName>/solution-checker/<SolutionName>-checker.sarif`) with a `sarif.path` sidecar file alongside it. An explicit `actions/upload-artifact@v4` step uploads the checker report as a separate artifact (`checker-<name>-run<N>`, 30-day retention). Pipeline 2 reads `sarif.path` from downloaded artifacts to locate and attach the report to ServiceNow change requests.
+
+**`health-check.yml` — standalone credential expiry pipeline**
+
+New reusable workflow (also callable via `workflow_dispatch` or `schedule`) that scans Azure Key Vault secrets, KV certificates, and App Registration client secrets for approaching expiry across multiple Azure identities. Configurable warning threshold (default 30 days), sorted by closest expiry first. Creates/updates/closes a GitHub Issue labelled `credential-expiry` with a summary table. Schedule reads config from `vars.HEALTH_CHECK_CONFIG` (JSON array of check contexts) and `vars.HEALTH_CHECK_WARN_DAYS`.
+
 ### Planned
 - `strict_version_compare` input for Prod/Perf environments — fail pipeline when Dataverse version query returns N/A (addresses DevSecOps finding F-07)
 - ServiceNow approval polling timeout — configurable max wait (addresses DevSecOps finding F-02)
