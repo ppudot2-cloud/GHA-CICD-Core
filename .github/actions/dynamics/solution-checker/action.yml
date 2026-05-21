@@ -2,10 +2,21 @@
 # COMPOSITE ACTION: Solution Checker
 # =============================================================================
 # Runs the Power Platform Solution Checker (always mandatory in non-mock mode).
-# Real mode: uses microsoft/powerplatform-actions/check-solution.
-# Mock mode: uses Invoke-SolutionCheckerSim.ps1 (no PP credentials needed).
-# PP credentials (PP_APP_ID, PP_CLIENT_SECRET, PP_TENANT_ID) are read from
-# GITHUB_ENV — set by the reveille action.
+#
+# CHANGE FROM ORIGINAL: previously used microsoft/powerplatform-actions/check-solution@v1
+# which writes SARIF to an unpredictable runner path, making capture unreliable.
+# This version calls `pac solution check --outputDirectory` directly so the SARIF
+# always lands in out/<SolutionName>/solution-checker/ — a deterministic, known path.
+#
+# SARIF availability after this action:
+#   • out/<SolutionName>/solution-checker/<SolutionName>-checker.sarif  (canonical)
+#   • out/<SolutionName>/solution-checker/sarif.path                    (path sidecar)
+#   • GitHub artifact: <checker_artifact_name>  (30-day retention, standalone download)
+#   • Also included in solution-artifact-<name> (uploaded by _job-build.yml step 7)
+#     so Pipeline 2 can read it after downloading solution artifacts.
+#
+# Mock mode: writes a minimal placeholder SARIF so downstream steps have a
+# consistent file path to reference.
 # =============================================================================
 name: 'Solution Checker'
 description: 'Run Power Platform Solution Checker (real or simulated). Always mandatory.'
@@ -29,57 +40,126 @@ inputs:
     required: true
     description: 'Solution output directory (e.g. out/MySolution)'
 
+outputs:
+  sarif_path:
+    description: 'Absolute path to the canonical SARIF file, or empty string if not produced'
+    value: ${{ steps.checker-real.outputs.sarif_path || steps.checker-mock.outputs.sarif_path }}
+
 runs:
   using: composite
   steps:
-    - name: Run Solution Checker — Real
-      id: solution-checker-real
-      if: ${{ inputs.mock_deploy != 'true' }}
-      uses: microsoft/powerplatform-actions/check-solution@v1
-      with:
-        app-id:                     ${{ env.PP_APP_ID }}
-        client-secret:              ${{ env.PP_CLIENT_SECRET }}
-        tenant-id:                  ${{ env.PP_TENANT_ID }}
-        path:                       ${{ inputs.unmanaged_zip }}
-        geo:                        UnitedStates
-        fail-on-analysis-error:     true
-        error-level:                ${{ inputs.checker_error_level }}
-        checker-logs-artifact-name: ${{ inputs.checker_artifact_name }}
 
-    - name: Copy checker report to output folder
+    # ── Real mode ─────────────────────────────────────────────────────────────
+    # Calls pac solution check with --outputDirectory so the SARIF lands in a
+    # controlled, predictable location. No longer relies on the MS action wrapper
+    # whose internal artifact upload was not surfacing the file reliably.
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: Run Solution Checker — Real
+      id: checker-real
       if: ${{ inputs.mock_deploy != 'true' }}
       shell: pwsh
       run: |
-        $destDir = "${{ inputs.out_dir }}/solution-checker"
-        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-        $searchRoots = @($env:RUNNER_TEMP, "$env:GITHUB_WORKSPACE", ".")
-        $found = @()
-        foreach ($root in $searchRoots) {
-          if ($root -and (Test-Path $root)) {
-            $files = Get-ChildItem -Path $root -Recurse -Include "*.sarif","*.sarif.json" `
-                       -ErrorAction SilentlyContinue |
-                     Where-Object { $_.FullName -notlike "*$destDir*" }
-            $found += $files
+        $checkerDir = "${{ inputs.out_dir }}/solution-checker"
+        New-Item -ItemType Directory -Path $checkerDir -Force | Out-Null
+
+        Write-Host ""
+        Write-Host "── Solution Checker ──────────────────────────────────────────"
+        Write-Host "  Solution   : ${{ inputs.solution_name }}"
+        Write-Host "  ZIP        : ${{ inputs.unmanaged_zip }}"
+        Write-Host "  Output dir : $checkerDir"
+        Write-Host "  Error level: ${{ inputs.checker_error_level }}"
+        Write-Host "──────────────────────────────────────────────────────────────"
+
+        # pac solution check writes results + SARIF to --outputDirectory.
+        # Exit code is non-zero when issues at or above --errorLevel are found.
+        pac solution check `
+          --path            "${{ inputs.unmanaged_zip }}" `
+          --outputDirectory "$checkerDir" `
+          --geo             "UnitedStates" `
+          --errorLevel      "${{ inputs.checker_error_level }}"
+
+        $exitCode = $LASTEXITCODE
+
+        # ── Locate and canonicalise the SARIF ─────────────────────────────────
+        $sarifFiles = Get-ChildItem -Path $checkerDir -Recurse `
+                        -Include "*.sarif","*.sarif.json" `
+                        -ErrorAction SilentlyContinue
+
+        if ($sarifFiles.Count -eq 0) {
+          # Some pac CLI versions write to RUNNER_TEMP instead of --outputDirectory
+          Write-Host "  SARIF not in output dir — searching RUNNER_TEMP..."
+          $fallback = Get-ChildItem -Path $env:RUNNER_TEMP -Recurse `
+                        -Include "*.sarif","*.sarif.json" `
+                        -ErrorAction SilentlyContinue
+          foreach ($f in $fallback) {
+            Copy-Item $f.FullName $checkerDir -Force
+            Write-Host "  Recovered from RUNNER_TEMP: $($f.Name)"
           }
-        }
-        if ($found.Count -gt 0) {
-          foreach ($f in $found) {
-            Copy-Item -Path $f.FullName -Destination $destDir -Force
-            Write-Host "✅ Copied checker report: $($f.Name) → $destDir/"
-          }
-        } else {
-          $placeholder = "$destDir/checker-summary.txt"
-          "Solution Checker completed. No SARIF file located on runner. See artifact '${{ inputs.checker_artifact_name }}'." |
-            Set-Content -Path $placeholder -Encoding UTF8
-          Write-Host "::notice::No SARIF file found — placeholder written."
+          $sarifFiles = Get-ChildItem -Path $checkerDir -Recurse `
+                          -Include "*.sarif","*.sarif.json" -ErrorAction SilentlyContinue
         }
 
+        $canonicalSarif = "$checkerDir/${{ inputs.solution_name }}-checker.sarif"
+        if ($sarifFiles.Count -gt 0) {
+          if ($sarifFiles[0].FullName -ne (Resolve-Path $canonicalSarif -ErrorAction SilentlyContinue)) {
+            Copy-Item $sarifFiles[0].FullName $canonicalSarif -Force
+          }
+          Write-Host "✅ Checker SARIF: $canonicalSarif"
+          # Write sidecar path file so deploy steps can locate the report without globbing
+          $canonicalSarif | Set-Content "$checkerDir/sarif.path" -Encoding UTF8
+          "sarif_path=$canonicalSarif" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        } else {
+          Write-Host "::warning::No SARIF produced by Solution Checker — check pac CLI version and output"
+          "not-found" | Set-Content "$checkerDir/sarif.path" -Encoding UTF8
+          "sarif_path=" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+
+        if ($exitCode -ne 0) {
+          Write-Host "::error::Solution Checker found issues at or above '${{ inputs.checker_error_level }}' (pac exit $exitCode)"
+          exit $exitCode
+        }
+        Write-Host "✅ Solution Checker passed — ${{ inputs.solution_name }}"
+
+    # ── Upload checker report as its own named artifact ───────────────────────
+    # This gives the checker report a direct download link in the GitHub Actions UI
+    # independent of solution-artifact-*, and is how Pipeline 2 / ServiceNow
+    # can reference it by artifact name without needing to know the file path.
+    - name: Upload checker report artifact
+      if: ${{ inputs.mock_deploy != 'true' && always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name:              ${{ inputs.checker_artifact_name }}
+        path:              ${{ inputs.out_dir }}/solution-checker/
+        retention-days:    30
+        if-no-files-found: warn
+
+    # ── Mock mode ─────────────────────────────────────────────────────────────
     - name: Run Solution Checker — Simulation (mock_deploy)
+      id: checker-mock
       if: ${{ inputs.mock_deploy == 'true' }}
       shell: pwsh
       run: |
+        $checkerDir = "${{ inputs.out_dir }}/solution-checker"
+        New-Item -ItemType Directory -Path $checkerDir -Force | Out-Null
+
         & .ci/.github/scripts/dynamics/Invoke-SolutionCheckerSim.ps1 `
           -SolutionName  '${{ inputs.solution_name }}' `
           -UnmanagedZip  '${{ inputs.unmanaged_zip }}' `
           -ManagedZip    '${{ inputs.managed_zip }}' `
           -ErrorLevel    '${{ inputs.checker_error_level }}'
+
+        # Write a minimal placeholder SARIF so downstream pipeline steps
+        # (ServiceNow attachment) have a consistent, readable file path
+        $mockSarif = "$checkerDir/${{ inputs.solution_name }}-checker.sarif"
+        @{
+          version = "2.1.0"
+          '$schema' = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
+          runs = @(@{
+            tool = @{ driver = @{ name = "PowerAppChecker (mock)"; version = "0.0.0"; rules = @() } }
+            results = @()
+          })
+        } | ConvertTo-Json -Depth 10 | Set-Content $mockSarif -Encoding UTF8
+
+        $mockSarif | Set-Content "$checkerDir/sarif.path" -Encoding UTF8
+        "sarif_path=$mockSarif" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        Write-Host "  [MOCK] Checker placeholder written: $mockSarif"

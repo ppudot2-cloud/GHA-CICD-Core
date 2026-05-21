@@ -76,6 +76,101 @@ runs:
         path: .ci
         token: ${{ env.GHA_CORE_PAT }}
 
+    # ── OIDC pre-login diagnostic ─────────────────────────────────────────────
+    # Validates that all three Azure identity inputs are non-empty and prints
+    # the OIDC subject claim that Azure AD will receive. This is the single most
+    # useful piece of information for diagnosing AADSTS700016 / AADSTS70021 errors:
+    #
+    #   AADSTS700016 — "Application not found in directory"
+    #     → AZURE_CLIENT_ID or AZURE_TENANT_ID is wrong.
+    #       Check: Settings → Environments → <env> → Variables — an environment-level
+    #       override may be shadowing the repo-level variable with a stale/wrong value.
+    #
+    #   AADSTS70021 — "No matching federated identity record"
+    #     → The subject claim printed below has no matching federated credential on
+    #       the App Registration. Add a federated credential in Azure AD:
+    #         Issuer  : https://token.actions.githubusercontent.com
+    #         Subject : <value printed below>
+    #
+    # Required federated credential subjects per pipeline / job context:
+    #   Pipeline 1 — build-and-deploy.yml (feature/* push)
+    #     Jobs in _stage-deploy-chain.yml with environment: Dev/Intg/UAT/FRS/Perf
+    #       Subject: repo:<org>/<repo>:environment:Dev  (and Intg, UAT, FRS, Perf)
+    #   Pipeline 2 — deploy-prod.yml (push to main / workflow_dispatch)
+    #     deploy-uat job with environment: UAT
+    #       Subject: repo:<org>/<repo>:environment:UAT
+    #     deploy-prod job with environment: Prod
+    #       Subject: repo:<org>/<repo>:environment:Prod
+    #   Other workflows without environment: (lint-and-validate, deploy-env, etc.)
+    #       Subject: repo:<org>/<repo>:ref:refs/heads/<branch>
+    # ─────────────────────────────────────────────────────────────────────────
+    - name: Validate Azure auth inputs and print OIDC subject
+      if: ${{ inputs.mock_deploy != 'true' }}
+      shell: bash
+      run: |
+        CLIENT_ID="${{ inputs.azure_client_id }}"
+        TENANT_ID="${{ inputs.azure_tenant_id }}"
+        SUB_ID="${{ inputs.azure_subscription_id }}"
+
+        echo "── Azure OIDC Auth Diagnostic ─────────────────────────────────"
+
+        # ── Validate inputs are non-empty ─────────────────────────────────────
+        FAILED=0
+        if [ -z "$CLIENT_ID" ]; then
+          echo "::error::AZURE_CLIENT_ID is empty."
+          echo "::error::Check: Settings → Secrets and variables → Variables → AZURE_CLIENT_ID (repo level)"
+          echo "::error::Also check: Settings → Environments → $(cat /dev/null) → Variables for an environment-level override with a wrong/empty value."
+          FAILED=1
+        fi
+        if [ -z "$TENANT_ID" ]; then
+          echo "::error::AZURE_TENANT_ID is empty."
+          echo "::error::Check: Settings → Secrets and variables → Variables → AZURE_TENANT_ID (repo level)"
+          FAILED=1
+        fi
+        if [ -z "$SUB_ID" ]; then
+          echo "::error::AZURE_SUBSCRIPTION_ID is empty."
+          echo "::error::Check: Settings → Secrets and variables → Variables → AZURE_SUBSCRIPTION_ID (repo level)"
+          FAILED=1
+        fi
+        if [ "$FAILED" = "1" ]; then exit 1; fi
+
+        # ── Print resolved values (client-id partially masked) ────────────────
+        CLIENT_MASKED="${CLIENT_ID:0:8}...${CLIENT_ID: -4}"
+        echo "  tenant_id        : ${TENANT_ID}"
+        echo "  subscription_id  : ${SUB_ID}"
+        echo "  client_id        : ${CLIENT_MASKED} (first 8 + last 4 chars shown)"
+
+        # ── Decode OIDC token and print subject claim ─────────────────────────
+        # The subject claim must exactly match a federated credential on the App Registration.
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          OIDC_TOKEN=$(curl -sS \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" \
+            | jq -r '.value // empty' 2>/dev/null || true)
+          if [ -n "$OIDC_TOKEN" ]; then
+            # Decode JWT payload (second segment, base64url → base64)
+            PAYLOAD=$(echo "$OIDC_TOKEN" | cut -d'.' -f2 | tr '_-' '/+' | \
+                      awk '{ while(length($0)%4!=0) $0=$0"="; print }' | base64 -d 2>/dev/null || true)
+            SUBJECT=$(echo "$PAYLOAD" | jq -r '.sub // "could not decode"' 2>/dev/null || echo "could not decode")
+            ISSUER=$(echo "$PAYLOAD"  | jq -r '.iss // "could not decode"' 2>/dev/null || echo "could not decode")
+            echo "  oidc_issuer      : ${ISSUER}"
+            echo "  oidc_subject     : ${SUBJECT}"
+            echo ""
+            echo "  ► The App Registration (client_id above) must have a federated credential with:"
+            echo "    Issuer  : ${ISSUER}"
+            echo "    Subject : ${SUBJECT}"
+            echo "  ► If you see AADSTS700016: the client_id/tenant_id above is wrong or the App"
+            echo "    Registration was deleted/moved. Check the tenant name in the Azure error vs"
+            echo "    the AZURE_TENANT_ID above — they must point to the same directory."
+            echo "  ► If you see AADSTS70021: add a federated credential with the subject above."
+          else
+            echo "  oidc_subject     : (could not fetch OIDC token — check id-token: write permission)"
+          fi
+        else
+          echo "  oidc_subject     : (OIDC env vars not available — is id-token: write granted?)"
+        fi
+        echo "──────────────────────────────────────────────────────────────"
+
     - name: Azure Login (OIDC)
       if: ${{ inputs.mock_deploy != 'true' }}
       uses: azure/login@v2
