@@ -1,6 +1,8 @@
 # GitHub Secrets & Variables — Quick Reference
 
 > This is a quick-reference card. For full setup instructions (Azure App Registration, OIDC, Key Vault, service principal) see [ENTERPRISE_DEVSECOPS_GUIDE.md](./ENTERPRISE_DEVSECOPS_GUIDE.md).
+>
+> For the per-environment federated credential matrix and step-by-step Azure CLI commands, see [OIDC_SETUP.md](../../GHA-Dynamics/docs/OIDC_SETUP.md) in GHA-Dynamics (the caller repo).
 
 ---
 
@@ -113,11 +115,17 @@ Environment names are **case-sensitive** and must match exactly as shown above.
 
 Some variables are set at the **Environment** level rather than the repository level, so each environment can have a different value. Navigate to **Settings → Environments → [Environment name] → Environment variables**.
 
+Environment-level values override the matching repo-level variable for jobs running in that environment. This is the mechanism that enables per-environment OIDC isolation with no workflow YAML changes.
+
 | Variable | Description | Example |
 |---|---|---|
+| `AZURE_CLIENT_ID` | Override the OIDC App Registration for this environment. **Required for per-environment isolation.** The federated credential on this App Registration must have `sub = repo:<org>/<repo>:environment:<EnvName>`. | `<app-id of sp-gha-uat>` |
+| `AZURE_KEY_VAULT_NAME` | Override the Key Vault for this environment. Set a separate KV per environment (or at minimum one for non-prod, one for prod). | `kv-pp-uat` |
+| `AZURE_TENANT_ID` | Override the tenant if environments span multiple Azure AD tenants (uncommon). Usually stays at repo level. | — |
+| `AZURE_SUBSCRIPTION_ID` | Override the subscription if environments are in different subscriptions (uncommon). Usually stays at repo level. | — |
 | `SERVICENOW_ENABLED` | Set to `true` to activate ServiceNow change management for this environment's deployments. When `true`, `reveille` fetches SNOW credentials from AKV and `deploy-all-solutions` opens/closes a CR around the import. | `true` |
-| `AZURE_KEY_VAULT_NAME` | Override the default Key Vault for this environment. Useful when non-prod and prod use separate Key Vaults or separate service principals. | `kv-pp-prod` |
-| `AZURE_CLIENT_ID` | Override the OIDC App Registration for this environment (if using per-environment app registrations). | — |
+
+> See [OIDC_SETUP.md](../../GHA-Dynamics/docs/OIDC_SETUP.md) for the full federated credential matrix, Azure CLI setup commands, and a verification checklist.
 
 **Recommended `SERVICENOW_ENABLED` configuration:**
 

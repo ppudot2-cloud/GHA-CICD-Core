@@ -200,6 +200,71 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+      # ── 7b. SBOM — CycloneDX (addresses DevSecOps finding F-06) ─────────────────
+      # Generates a Software Bill of Materials for the packed solution ZIP.
+      # Output: out/<SolutionName>/<artifact_name>-sbom.json (CycloneDX JSON).
+      # Always runs (real and mock) so the artifact chain is consistent.
+      - name: Generate SBOM (CycloneDX)
+        id: sbom
+        shell: pwsh
+        run: |
+          $solution     = '${{ inputs.solution_name }}'
+          $version      = '${{ steps.pack.outputs.version }}'
+          $artifactName = '${{ steps.pack.outputs.artifact_name }}'
+          $outDir       = '${{ steps.pack.outputs.out_dir }}'
+          $isMock       = '${{ inputs.mock_deploy }}' -eq 'true'
+          $sbomPath     = "$outDir/${artifactName}-sbom.json"
+
+          # CycloneDX schema v1.5 — minimal SBOM for a single Power Platform solution component
+          $sbom = [ordered]@{
+            bomFormat   = 'CycloneDX'
+            specVersion = '1.5'
+            version     = 1
+            serialNumber = "urn:uuid:$([System.Guid]::NewGuid())"
+            metadata    = @{
+              timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+              tools     = @(@{ vendor = 'GHA-Core'; name = 'sbom-generator'; version = '1.0' })
+              component = @{
+                type    = 'application'
+                name    = $solution
+                version = $version
+                purl    = "pkg:dynamics/$solution@$version"
+              }
+            }
+            components  = @(
+              @{
+                type    = 'application'
+                name    = $solution
+                version = $version
+                purl    = "pkg:dynamics/$solution@$version"
+                properties = @(
+                  @{ name = 'gha:artifact';    value = $artifactName }
+                  @{ name = 'gha:run_number';  value = '${{ github.run_number }}' }
+                  @{ name = 'gha:run_attempt'; value = '${{ github.run_attempt }}' }
+                  @{ name = 'gha:repository';  value = '${{ github.repository }}' }
+                  @{ name = 'gha:sha';         value = '${{ github.sha }}' }
+                  @{ name = 'gha:ref';         value = '${{ github.ref }}' }
+                  @{ name = 'gha:mock_deploy'; value = $isMock.ToString().ToLower() }
+                )
+              }
+            )
+          }
+
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $sbom | ConvertTo-Json -Depth 10 | Set-Content $sbomPath -Encoding utf8
+          Write-Host "✅ SBOM written: $sbomPath"
+          if ($isMock) { Write-Host "🧪 [MOCK] SBOM generated for simulation run" }
+
+          "sbom_path=$sbomPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ inputs.solution_name }}-run${{ github.run_number }}
+          path: ${{ steps.sbom.outputs.sbom_path }}
+          retention-days: 90
+          if-no-files-found: warn
+
       # ── 8. JFrog Upload (archival — once per build) ───────────────────────────
       # Long-term storage and prodDeployed tagging. Not used by deploy stages.
       - name: JFrog Upload

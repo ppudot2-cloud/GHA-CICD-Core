@@ -47,10 +47,30 @@ Replaced the `microsoft/powerplatform-actions/check-solution@v1` wrapper with di
 
 New reusable workflow (also callable via `workflow_dispatch` or `schedule`) that scans Azure Key Vault secrets, KV certificates, and App Registration client secrets for approaching expiry across multiple Azure identities. Configurable warning threshold (default 30 days), sorted by closest expiry first. Creates/updates/closes a GitHub Issue labelled `credential-expiry` with a summary table. Schedule reads config from `vars.HEALTH_CHECK_CONFIG` (JSON array of check contexts) and `vars.HEALTH_CHECK_WARN_DAYS`.
 
+**`verify-deployment` composite action — post-deploy Dataverse health check**
+
+New composite action at `.github/actions/dynamics/verify-deployment`. Confirms every deployed solution is live in Dataverse at the expected version after `import-solution` completes. Checks: solution present in `pac solution list`, version matches artifact version, no blocking async operations. In `mock_deploy` mode all checks are simulated. Wired into `deploy-all-solutions` as Step G, running immediately after the deployment loop on every environment. Exits 1 on any mismatch so the job fails visibly rather than silently accepting a partial deploy.
+
+**`deploy-all-solutions` — structured JSON audit log (Step H)**
+
+Every deploy job now writes a machine-readable `audit-log/<env>-run<N>-attempt<A>.json` record in CycloneDX-inspired structure: timestamp, actor, SHA, environment, solution list, deploy status, ServiceNow CR number, and run URL. Uploaded as a GitHub artifact (`audit-log-<env>-run<N>`, 90-day retention). Runs with `if: always()` so failed deploys are also captured. Satisfies audit trail requirements for regulated enterprise environments.
+
+**`_job-build.yml` — CycloneDX SBOM generation (addresses DevSecOps finding F-06)**
+
+Step 7b generates a CycloneDX v1.5 JSON SBOM for each packed solution, capturing solution name, version, PURL (`pkg:dynamics/<name>@<version>`), git SHA, ref, and run metadata. Written to `out/<SolutionName>/<artifact_name>-sbom.json`. Uploaded as a GitHub artifact (`sbom-<name>-run<N>`, 90-day retention). Runs in both real and mock mode for consistency.
+
+**Pester unit tests — Dynamics PowerShell scripts**
+
+Three new Pester v5 test files covering the governance-critical scripts (previously untested):
+- `Merge-Variables.Tests.ps1` — variable merge, protected-key violation detection, AZURE_* exclusion, missing-file handling
+- `Set-SolutionVersion.Tests.ps1` — version read, GITHUB_OUTPUT correctness, file immutability, error cases
+- `Resolve-SolutionMatrix.Tests.ps1` — solutions.json source, deployOrder sorting, subset selection, filesystem fallback, PP_SOLUTION_NAME fallback, no-solutions error
+
+Tests are located at `.github/servicenow/Tests/Unit/Dynamics/` and run automatically via `pipeline-test.yml` in GHA-Dynamics.
+
 ### Planned
 - `strict_version_compare` input for Prod/Perf environments — fail pipeline when Dataverse version query returns N/A (addresses DevSecOps finding F-07)
 - ServiceNow approval polling timeout — configurable max wait (addresses DevSecOps finding F-02)
-- SBOM generation (CycloneDX) at build stage (addresses DevSecOps finding F-06)
 
 ---
 

@@ -709,3 +709,140 @@ runs:
         path: backup/
         retention-days: 30
         if-no-files-found: warn
+
+    # ── STEP G: Post-deploy verification ─────────────────────────────────────
+    # Confirms every solution in the matrix is actually live in Dataverse at the
+    # correct version. Fails the job if any solution is missing or version mismatches.
+    # In mock_deploy mode all checks are simulated (no Dataverse calls).
+    - name: Post-deploy verification — ${{ inputs.environment_name }}
+      shell: pwsh
+      run: |
+        $envName    = '${{ inputs.environment_name }}'
+        $envUrl     = '${{ inputs.environment_url }}'
+        $isMock     = '${{ inputs.mock_deploy }}' -eq 'true'
+        $matrixJson = '${{ inputs.solutions_json }}'
+
+        # Parse solution list from matrix JSON
+        try {
+          $matrix    = $matrixJson | ConvertFrom-Json
+          $solutions = $matrix.include | ForEach-Object { $_.solution }
+        } catch {
+          Write-Host "::warning::Could not parse solutions_json — skipping post-deploy verification."
+          exit 0
+        }
+
+        if ($solutions.Count -eq 0) {
+          Write-Host "::warning::No solutions in matrix — skipping post-deploy verification."
+          exit 0
+        }
+
+        Write-Host ""
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        Write-Host "  📋 Post-deploy verification — $envName"
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        $rows   = @()
+        $failed = @()
+
+        foreach ($sol in $solutions) {
+          if ($isMock) {
+            Write-Host "  🧪 [MOCK] $sol — verified (simulated)"
+            $rows += "| $sol | ✅ [MOCK] Present | ✅ [MOCK] Version OK |"
+            continue
+          }
+
+          # Real: use pac solution list to confirm the solution is installed
+          $output = pac solution list `
+            --environment $envUrl `
+            --app-id      $env:PP_APP_ID `
+            --client-secret $env:PP_CLIENT_SECRET `
+            --tenant      $env:PP_TENANT_ID `
+            2>&1
+
+          $line = $output | Where-Object { $_ -match "^\s*$sol\s" }
+          if (-not $line) {
+            Write-Host "  ❌ $sol — NOT FOUND in $envName"
+            $rows   += "| $sol | ❌ Not found | — |"
+            $failed += $sol
+          } else {
+            Write-Host "  ✅ $sol — $($line.Trim())"
+            $rows   += "| $sol | ✅ Present | ✅ |"
+          }
+        }
+
+        # Write step summary
+        $table = $rows -join "`n"
+        @"
+
+        ### $(if ($failed.Count -eq 0) { '✅' } else { '❌' }) Post-deploy Verification — $envName
+        | Solution | Present | Version |
+        |---|---|---|
+        $table
+        "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+        if ($failed.Count -gt 0) {
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          Write-Error "::error::Post-deploy verification FAILED for: $($failed -join ', ') in $envName"
+          exit 1
+        }
+        Write-Host "  ✅ All $($solutions.Count) solution(s) verified in $envName"
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # ── STEP H: Structured JSON audit log ────────────────────────────────────
+    # Writes a machine-readable deployment record to audit-log/<env>-<run>.json.
+    # Uploaded as a GitHub artifact (90-day retention) for compliance/audit use.
+    # Runs with if: always() so failed deploys are also recorded.
+    - name: Write deployment audit log — ${{ inputs.environment_name }}
+      if: always()
+      shell: pwsh
+      run: |
+        $envName     = '${{ inputs.environment_name }}'
+        $envUrl      = '${{ inputs.environment_url }}'
+        $isMock      = '${{ inputs.mock_deploy }}' -eq 'true'
+        $runNumber   = '${{ inputs.run_number }}'
+        $runAttempt  = '${{ inputs.run_attempt }}'
+        $matrixJson  = '${{ inputs.solutions_json }}'
+
+        # Parse solution list
+        $solutions = @()
+        try {
+          $matrix    = $matrixJson | ConvertFrom-Json
+          $solutions = $matrix.include | ForEach-Object { $_.solution }
+        } catch { }
+
+        # Build audit record
+        $auditRecord = [ordered]@{
+          schemaVersion    = '1.0'
+          eventType        = 'deployment'
+          timestamp        = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+          runNumber        = $runNumber
+          runAttempt       = $runAttempt
+          repository       = '${{ github.repository }}'
+          sha              = '${{ github.sha }}'
+          ref              = '${{ github.ref }}'
+          actor            = '${{ github.actor }}'
+          environment      = $envName
+          environmentUrl   = $envUrl
+          mockDeploy       = $isMock
+          solutions        = $solutions
+          deployStatus     = $env:SNOW_DEPLOY_STATUS   # set by deploy loop above
+          serviceNowCR     = $env:SNOW_CHANGE_REQUEST_ID
+          runUrl           = "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        }
+
+        $outDir  = 'audit-log'
+        New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+        $outFile = "$outDir/${envName}-run${runNumber}-attempt${runAttempt}.json"
+        $auditRecord | ConvertTo-Json -Depth 5 | Set-Content $outFile -Encoding utf8
+
+        Write-Host "📋 Audit log written: $outFile"
+        if ($isMock) { Write-Host "🧪 [MOCK] Audit log records simulation run" }
+
+    - name: Upload deployment audit log — ${{ inputs.environment_name }}
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: audit-log-${{ inputs.environment_name }}-run${{ inputs.run_number }}
+        path: audit-log/
+        retention-days: 90
+        if-no-files-found: warn

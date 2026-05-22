@@ -1,0 +1,180 @@
+# =============================================================================
+# COMPOSITE ACTION: verify-deployment
+# =============================================================================
+# Post-deploy health check — confirms a solution is actually live in Dataverse
+# after `import-solution` completes.
+#
+# Checks performed:
+#   1. Solution exists in target environment (pac solution list)
+#   2. Deployed version matches the artifact version (no silent rollback)
+#   3. No blocking async operations are still in progress
+#
+# On failure: writes ::error:: annotations and exits 1 so the calling job fails.
+# On mock_deploy: all checks are simulated with no real Dataverse calls.
+# =============================================================================
+
+name: 'Verify Deployment'
+description: 'Post-deploy health check: confirm solution version is live in Dataverse, no blocking async ops.'
+
+inputs:
+  solution_name:
+    description: 'Solution unique name to verify (e.g. nfCRMSolution)'
+    required: true
+  expected_version:
+    description: 'Version string that should now be live (e.g. 1.2.3.4)'
+    required: true
+  environment_url:
+    description: 'Target Dataverse environment URL'
+    required: true
+  app_id:
+    description: 'Service principal client ID (from ${{ env.PP_APP_ID }} set by reveille)'
+    required: false
+    default: ''
+  client_secret:
+    description: 'Service principal client secret (from ${{ env.PP_CLIENT_SECRET }} set by reveille)'
+    required: false
+    default: ''
+  tenant_id:
+    description: 'Azure AD tenant ID (from ${{ env.PP_TENANT_ID }} set by reveille)'
+    required: false
+    default: ''
+  mock_deploy:
+    description: 'Simulate all checks without real Dataverse calls'
+    required: false
+    default: 'false'
+  max_wait_seconds:
+    description: 'Maximum seconds to wait for async ops to clear before failing (default: 120)'
+    required: false
+    default: '120'
+
+outputs:
+  deployed_version:
+    description: 'Actual version found in the target environment after deployment'
+    value: ${{ steps.verify.outputs.deployed_version }}
+  health_status:
+    description: 'Overall health: "healthy", "version_mismatch", "async_blocked", "not_found", or "simulated"'
+    value: ${{ steps.verify.outputs.health_status }}
+
+runs:
+  using: composite
+  steps:
+    # ── 1. Install PAC CLI (if not already on path) ─────────────────────────
+    - name: Install PAC CLI
+      if: inputs.mock_deploy != 'true'
+      uses: microsoft/powerplatform-actions/actions-install@v1
+      with:
+        add-tools-to-path: true
+
+    # ── 2. Verify deployment (real) ──────────────────────────────────────────
+    - name: Verify deployment
+      id: verify
+      shell: pwsh
+      run: |
+        $solutionName     = '${{ inputs.solution_name }}'
+        $expectedVersion  = '${{ inputs.expected_version }}'
+        $environmentUrl   = '${{ inputs.environment_url }}'
+        $mockDeploy       = '${{ inputs.mock_deploy }}' -eq 'true'
+        $maxWait          = [int]'${{ inputs.max_wait_seconds }}'
+
+        # ── Simulation mode ────────────────────────────────────────────────
+        if ($mockDeploy) {
+          Write-Host "🧪 [MOCK] Simulating deployment verification for $solutionName @ $expectedVersion"
+          Write-Host "🧪 [MOCK] Target: $environmentUrl"
+          Write-Host ""
+
+          @"
+          ### 🧪 Deployment Verification — SIMULATED
+          | Check | Result |
+          |---|---|
+          | Solution found | ✅ [MOCK] $solutionName |
+          | Version match  | ✅ [MOCK] $expectedVersion |
+          | Async ops      | ✅ [MOCK] No blocking operations |
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+          "deployed_version=$expectedVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "health_status=simulated"           | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          exit 0
+        }
+
+        # ── Real verification ─────────────────────────────────────────────
+        $appId        = if ($env:PP_APP_ID)        { $env:PP_APP_ID }        else { '${{ inputs.app_id }}' }
+        $clientSecret = if ($env:PP_CLIENT_SECRET) { $env:PP_CLIENT_SECRET } else { '${{ inputs.client_secret }}' }
+        $tenantId     = if ($env:PP_TENANT_ID)     { $env:PP_TENANT_ID }     else { '${{ inputs.tenant_id }}' }
+
+        if (-not $appId -or -not $clientSecret -or -not $tenantId) {
+          Write-Host "::error::PP credentials are not available. Ensure reveille ran before this action."
+          exit 1
+        }
+
+        # ── Check 1: Solution exists ──────────────────────────────────────
+        Write-Host "🔍 Checking solution '$solutionName' in $environmentUrl ..."
+        $listOutput = pac solution list `
+          --environment $environmentUrl `
+          --app-id $appId `
+          --client-secret $clientSecret `
+          --tenant $tenantId `
+          2>&1
+
+        $solutionLine = $listOutput | Where-Object { $_ -match "^\s*$solutionName\s" }
+        if (-not $solutionLine) {
+          Write-Host "::error::Solution '$solutionName' not found in $environmentUrl after import."
+          "health_status=not_found" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          exit 1
+        }
+        Write-Host "✅ Solution found: $solutionLine"
+
+        # ── Check 2: Version match ────────────────────────────────────────
+        # pac solution list output format: <UniqueName>  <FriendlyName>  <Version>  <Managed>
+        $deployedVersion = ($solutionLine -split '\s+' | Where-Object { $_ -match '^\d+\.\d+' } | Select-Object -First 1)
+        "deployed_version=$deployedVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+        if ($deployedVersion -ne $expectedVersion) {
+          Write-Host "::error::Version mismatch for '$solutionName': expected $expectedVersion, found $deployedVersion in $environmentUrl."
+          "health_status=version_mismatch" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          exit 1
+        }
+        Write-Host "✅ Version verified: $deployedVersion"
+
+        # ── Check 3: No blocking async operations ─────────────────────────
+        Write-Host "⏳ Checking for blocking async operations (max ${maxWait}s) ..."
+        $elapsed  = 0
+        $interval = 15
+        $blocked  = $false
+
+        while ($elapsed -lt $maxWait) {
+          $asyncOutput = pac solution check-async `
+            --environment $environmentUrl `
+            --app-id $appId `
+            --client-secret $clientSecret `
+            --tenant $tenantId `
+            2>&1
+
+          if ($LASTEXITCODE -eq 0 -and $asyncOutput -notmatch '(?i)(inprogress|running|pending)') {
+            Write-Host "✅ No blocking async operations."
+            $blocked = $false
+            break
+          }
+
+          Write-Host "  ⏳ Async ops still in progress — waiting ${interval}s (${elapsed}s/${maxWait}s elapsed)"
+          Start-Sleep -Seconds $interval
+          $elapsed += $interval
+          $blocked = $true
+        }
+
+        if ($blocked) {
+          Write-Host "::warning::Async operations still in progress after ${maxWait}s. Deployment may not be fully settled."
+          "health_status=async_blocked" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        } else {
+          "health_status=healthy" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+
+        # ── Step Summary ─────────────────────────────────────────────────
+        @"
+
+        ### ✅ Deployment Verification — $solutionName
+        | Check | Result |
+        |---|---|
+        | Solution found in $environmentUrl | ✅ |
+        | Expected version ($expectedVersion) | ✅ |
+        | Async operations | $(if ($blocked) { '⚠️ Still in progress after ${maxWait}s' } else { '✅ Clear' }) |
+        "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
