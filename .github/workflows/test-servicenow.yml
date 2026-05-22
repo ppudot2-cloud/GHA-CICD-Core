@@ -1,0 +1,477 @@
+# =============================================================================
+# WORKFLOW: Test ServiceNow Integration — Full Simulation
+# =============================================================================
+#
+# Simulates the complete 14-step ServiceNow + deployment flow with NO external
+# dependencies. No Azure login, no real SNOW API calls, no PAC CLI.
+# Every step prints exactly what the real pipeline would output so you can
+# verify the flow, timing, and CR lifecycle before wiring up live credentials.
+#
+# SIMULATED FLOW:
+#   [Reveille]      Checkout repos, Azure OIDC login, AKV secret fetch,
+#                   merge variables, register PS module repo
+#   [Pre-Deploy]
+#     Step 1  Load ServiceNow PS module
+#     Step 2  Set dynamic runtime environment variables
+#     Step 3  New-ServiceNowChangeRequest   → CR opened (CHG#######)
+#     Step 4  Add-ServiceNowAuditTrailArtifact → SARIF attached
+#     Step 5  Set-ServiceNowChangeWindow    → window scheduled
+#     Step 6  Get-ServiceNowConflict        → no conflicts
+#     Step 7  Request-ServiceNowApproval    → approval requested
+#     Step 8  Get-ServiceNowApprovalStatus  → approved (simulated)
+#   [Deployment]
+#     Step 9   Find solutions in target env
+#     Step 10  Import solution (stage-and-upgrade)
+#     Step 11  Activate flows + classic workflows
+#   [Post-Deploy]
+#     Step 12  Find pipeline approvers (GitHub Environments API)
+#     Step 13  Detect deployment status (SNOW_DEPLOY_STATUS)
+#     Step 14  Close-ServiceNowChangeRequest → CR closed
+# =============================================================================
+
+name: "🧪 Test ServiceNow — Full Simulation"
+
+on:
+  workflow_dispatch:
+    inputs:
+
+      environment_name:
+        description: 'Target environment (used in CR description and deploy simulation)'
+        required: true
+        default: 'UAT'
+        type: choice
+        options: [Dev, Intg, UAT, FRS, Perf, Prod]
+
+      solution_list:
+        description: 'Solutions to include in the CR description'
+        required: false
+        default: 'CoreSolution, ExtensionA, ContosoCRM'
+
+      simulate_outcome:
+        description: 'Simulated deployment result — tests success or failure CR closure path'
+        required: false
+        default: 'success'
+        type: choice
+        options: [success, failure]
+
+permissions:
+  contents: read
+  actions:  read
+
+concurrency:
+  group: "test-servicenow-${{ inputs.environment_name }}"
+  cancel-in-progress: true
+
+jobs:
+  simulate-servicenow:
+    name: "🧪 SNOW Simulation | ${{ inputs.environment_name }} | ${{ inputs.simulate_outcome }}"
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ══════════════════════════════════════════════════════════════════════
+      # REVEILLE SIMULATION
+      # ══════════════════════════════════════════════════════════════════════
+      - name: "🎺 Reveille — Setup & Credential Bootstrap"
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          Write-Host "  🎺  REVEILLE — Wake the runner"
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          Write-Host ""
+          Write-Host "  [1/6] Checkout calling repository (GHA-Dynamics)"
+          Start-Sleep -Milliseconds 500
+          Write-Host "        ✓ Checked out @ ${{ github.sha }}"
+
+          Write-Host ""
+          Write-Host "  [2/6] Checkout GHA-Core CI scripts → .ci/"
+          Start-Sleep -Milliseconds 500
+          Write-Host "        ✓ GHA-Core @ main checked out"
+
+          Write-Host ""
+          Write-Host "  [3/6] Azure OIDC Login"
+          Start-Sleep -Seconds 1
+          Write-Host "        ✓ Authenticated as service principal (AZURE_CLIENT_ID: ***)"
+          Write-Host "          Tenant   : ***  |  Subscription: ***"
+
+          Write-Host ""
+          Write-Host "  [4/6] Fetch secrets from Azure Key Vault"
+          Start-Sleep -Seconds 1
+          $secrets = @(
+            @{ key = 'pp-app-id';              env = 'PP_APP_ID' },
+            @{ key = 'pp-client-secret';       env = 'PP_CLIENT_SECRET' },
+            @{ key = 'pp-tenant-id';           env = 'PP_TENANT_ID' },
+            @{ key = 'snow-base-uri';          env = 'SERVICENOWMURI' },
+            @{ key = 'snow-oauth-client-id';   env = 'SNOW_OAUTH_CLIENT_ID' },
+            @{ key = 'snow-oauth-client-secret'; env = 'SNOW_OAUTH_CLIENT_SECRET' }
+          )
+          foreach ($s in $secrets) {
+            Write-Host "        ✔ AKV:'$($s.key)' → ENV:'$($s.env)'"
+          }
+          Write-Host "        ✅ All secrets fetched from Azure Key Vault"
+
+          Write-Host ""
+          Write-Host "  [5/6] Merge global + project variables"
+          Start-Sleep -Milliseconds 500
+          Write-Host "        ✓ global-vars.yml  merged → 24 variables exported"
+          Write-Host "        ✓ project-vars.yml merged → 8 variables exported"
+
+          Write-Host ""
+          Write-Host "  [6/6] Register JFrog as default PS module repository"
+          Start-Sleep -Milliseconds 500
+          Write-Host "        ✓ PSGallery unregistered"
+          Write-Host "        ✓ JFrog registered: https://artifactory.example.com/api/nuget/v2/ps-modules"
+
+          Write-Host ""
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          Write-Host "  ✅  Reveille complete — runner is armed and ready"
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ══════════════════════════════════════════════════════════════════════
+      # SERVICENOW PRE-DEPLOY SIMULATION  (Steps 1-8)
+      # ══════════════════════════════════════════════════════════════════════
+      - name: "🔔 ServiceNow — Pre-Deploy (Open CR + Approval Gate)"
+        shell: pwsh
+        run: |
+          $envName     = '${{ inputs.environment_name }}'
+          $solList     = '${{ inputs.solution_list }}'
+          $repo        = '${{ github.repository }}'
+          $runNum      = '${{ github.run_number }}'
+          $actor       = '${{ github.actor }}'
+          $runUrl      = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          $crNumber    = "CHG$(Get-Random -Minimum 1000000 -Maximum 9999999)"
+          $crSysId     = [guid]::NewGuid().ToString()
+          $today       = (Get-Date).DayOfWeek.ToString()
+          $changeWindow = (Get-Date).AddDays(1).ToString("yyyy-MM-dd HH:mm")
+
+          Write-Host ""
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          Write-Host "  🔔  ServiceNow — Pre-Deploy | $envName"
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          # Step 1
+          Write-Host ""
+          Write-Host ":: Step 1 — Load ServiceNow module"
+          Start-Sleep -Milliseconds 400
+          Write-Host "  . Classes/ServiceNow.Class.ps1"
+          Write-Host "  . Private/Get-ChangeMeetingSchedule.ps1"
+          Write-Host "  . Private/Invoke-ServiceNowRestApi.ps1"
+          Write-Host "  . Private/New-StartDateEstimate.ps1"
+          Write-Host "  . Private/Resolve-PlannedReleaseWindow.ps1"
+          Write-Host "  . Private/Write-ConsoleOutput.ps1"
+          Write-Host "  . Public/New-ServiceNowChangeRequest.ps1"
+          Write-Host "  . Public/Add-ServiceNowAuditTrailArtifact.ps1"
+          Write-Host "  . Public/Set-ServiceNowChangeWindow.ps1"
+          Write-Host "  . Public/Get-ServiceNowConflict.ps1"
+          Write-Host "  . Public/Request-ServiceNowApproval.ps1"
+          Write-Host "  . Public/Get-ServiceNowApprovalStatus.ps1"
+          Write-Host "  . Public/Get-PipelineApprovers.ps1"
+          Write-Host "  . Public/Close-ServiceNowChangeRequest.ps1"
+          Write-Host "  ✓ ServiceNow module loaded (14 files)"
+
+          # Step 2
+          Write-Host ""
+          Write-Host ":: Step 2 — Set runtime environment variables"
+          Start-Sleep -Milliseconds 400
+          Write-Host "  BUILD_UNIQUE_IDENTIFIER    : $repo-$runNum-1"
+          Write-Host "  SERVICENOWSHORTDESCRIPTION : GHA Deploy: $envName | $repo | Run #$runNum"
+          Write-Host "  SERVICENOWRELEASEENVIRONMENT: $($envName.ToUpper())"
+          Write-Host "  SERVICENOWCHANGETYPE       : standard"
+          Write-Host "  SERVICENOWRISKLEVEL        : Low"
+          Write-Host "  SERVICENOWIMPACTLEVEL      : 3 - Low"
+          Write-Host "  Change window day          : $today"
+          Write-Host "  ✓ Runtime variables set"
+
+          # Step 3
+          Write-Host ""
+          Write-Host ":: Step 3 — Open ServiceNow change request"
+          Start-Sleep -Seconds 2
+          Write-Host "  POST $env:SERVICENOWMURI/api/now/table/change_request"
+          Write-Host "  → HTTP 201 Created"
+          Write-Host "  ✓ Change request created"
+          Write-Host "    Number : $crNumber"
+          Write-Host "    sys_id : $crSysId"
+          Write-Host "    Risk   : Low"
+          Write-Host "    State  : New"
+
+          # Persist to job env for post-deploy step
+          "SNOW_CHANGE_REQUEST_NUMBER=$crNumber" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SNOW_CHANGE_REQUEST_ID=$crSysId"      | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SNOW_CHANGE_RISK_LEVEL=Low"            | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          # Step 4
+          Write-Host ""
+          Write-Host ":: Step 4 — Attach audit trail (Solution Checker SARIF)"
+          Start-Sleep -Milliseconds 500
+          Write-Host "  Audit trail skipped — no sarif_path provided"
+          Write-Host "  (In real pipeline: SARIF from build stage would be attached here)"
+
+          # Step 5
+          Write-Host ""
+          Write-Host ":: Step 5 — Set ServiceNow change window"
+          Start-Sleep -Seconds 1
+          Write-Host "  PATCH $env:SERVICENOWMURI/api/now/table/change_request/$crSysId"
+          Write-Host "  Payload: { planned_start_date: '$changeWindow', planned_end_date: '...' }"
+          Write-Host "  → HTTP 200 OK"
+          Write-Host "  ✓ Change window set"
+          Write-Host "    Day      : $today"
+          Write-Host "    Risk     : Low"
+          Write-Host "    Window   : $changeWindow"
+
+          # Step 6
+          Write-Host ""
+          Write-Host ":: Step 6 — Check ServiceNow conflict status"
+          Start-Sleep -Seconds 1
+          Write-Host "  GET $env:SERVICENOWMURI/api/now/table/change_conflict?cr=$crNumber"
+          Write-Host "  → HTTP 200 OK  |  conflicts: 0"
+          Write-Host "  ✓ No blocking conflicts found"
+
+          # Step 7
+          Write-Host ""
+          Write-Host ":: Step 7 — Request ServiceNow approval"
+          Start-Sleep -Seconds 1
+          Write-Host "  PATCH $env:SERVICENOWMURI/api/now/table/change_request/$crSysId"
+          Write-Host "  Payload: { state: 'Review' }"
+          Write-Host "  → HTTP 200 OK"
+          Write-Host "  Approval requested from assignment group"
+          Write-Host "  ✓ Approval requested for: $crNumber"
+
+          # Step 8 — poll simulation (3 ticks)
+          Write-Host ""
+          Write-Host ":: Step 8 — Poll ServiceNow for approval status"
+          for ($i = 1; $i -le 3; $i++) {
+            Start-Sleep -Seconds 2
+            $status = if ($i -lt 3) { "requested ($i/3)" } else { "approved" }
+            Write-Host "  [Poll $i/3] GET .../change_request/$crSysId  → approval_state: $status"
+          }
+          Write-Host "  ✓ Change request APPROVED — proceeding with deployment"
+
+          Write-Host ""
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          Write-Host "  ✅  ServiceNow Pre-Deploy complete"
+          Write-Host "     CR : $crNumber  |  sys_id: $crSysId"
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ══════════════════════════════════════════════════════════════════════
+      # DEPLOYMENT SIMULATION  (Steps 9-11)
+      # ══════════════════════════════════════════════════════════════════════
+      - name: "🚀 Deploy — Solution Import Simulation"
+        id: deploy
+        shell: pwsh
+        run: |
+          $envName  = '${{ inputs.environment_name }}'
+          $outcome  = '${{ inputs.simulate_outcome }}'
+          $solutions = '${{ inputs.solution_list }}' -split ',' | ForEach-Object { $_.Trim() }
+
+          Write-Host ""
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          Write-Host "  🚀  DEPLOYMENT | $envName  ($($solutions.Count) solution(s))"
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          foreach ($sol in $solutions) {
+            Write-Host ""
+            Write-Host "::group::[$sol] Deploy → $envName"
+
+            Write-Host "  [$sol] Step 1/11 — Verify artifact present"
+            Start-Sleep -Milliseconds 300
+            Write-Host "    ✓ out/$sol/${sol}_managed.zip  (2.4 MB)"
+
+            Write-Host "  [$sol] Step 2/11 — Resolve deployment settings"
+            Start-Sleep -Milliseconds 300
+            Write-Host "    ✓ deployment-settings/$($envName.ToLower())/$sol.json"
+            Write-Host "    ✓ Tokens resolved: #{PP_ENVIRONMENT_URL}# #{MULESOFT_CLIENT_ID}#"
+
+            Write-Host "  [$sol] Step 3/11 — Verify base solutions"
+            Start-Sleep -Milliseconds 300
+            Write-Host "    ✓ Base solution 'PowerPlatformBase' found in $envName"
+
+            Write-Host "  [$sol] Step 4/11 — Blocking check"
+            Start-Sleep -Milliseconds 500
+            Write-Host "    ✓ No blocking solutions found"
+
+            Write-Host "  [$sol] Step 5/11 — Version compare"
+            Start-Sleep -Milliseconds 400
+            Write-Host "    Installed : 1.0.20240101.1"
+            Write-Host "    Artifact  : 1.0.20260519.1"
+            Write-Host "    ✓ Upgrade detected — proceeding with import"
+
+            Write-Host "  [$sol] Step 6/11 — Find solution in $envName"
+            Start-Sleep -Milliseconds 400
+            Write-Host "    ✅ Found '$sol' in $envName — installed version: 1.0.20240101.1"
+            Write-Host "       → This is an UPGRADE"
+
+            Write-Host "  [$sol] Step 7/11 — Backup"
+            Start-Sleep -Seconds 1
+            Write-Host "    Exporting backup → backup/${sol}_${envName}_backup.zip"
+            Write-Host "    ✓ Backup exported (1.8 MB)"
+
+            Write-Host "  [$sol] Step 8/11 — Import solution"
+            Start-Sleep -Seconds 2
+            Write-Host "    pac solution import --path out/$sol/${sol}_managed.zip --import-as-holding"
+            Write-Host "    [pac] Importing solution '$sol'..."
+            Write-Host "    [pac] Solution imported successfully (holding)"
+            Start-Sleep -Seconds 1
+            Write-Host "    pac solution upgrade --solution-name $sol"
+            Write-Host "    [pac] Upgrade applied ✓"
+
+            Write-Host "  [$sol] Step 9/11 — Config data"
+            Start-Sleep -Milliseconds 400
+            Write-Host "    pac data import --path config-data/$sol-data.zip"
+            Write-Host "    ✓ Configuration data imported"
+
+            Write-Host "  [$sol] Step 10/11 — Publish customizations"
+            Start-Sleep -Milliseconds 500
+            Write-Host "    ✓ Publish skipped — upgrade pattern publishes during apply-upgrade"
+
+            Write-Host "  [$sol] Step 11/11 — Activate flows + classic workflows"
+            Start-Sleep -Seconds 1
+            Write-Host "    [A] Power Automate cloud flows (.json)"
+            Write-Host "        Found 2 cloud flow definition(s)"
+            Write-Host "        ▶ Enabling flow: new_NotifyOnOpportunityWon_<guid>"
+            Write-Host "        ▶ Enabling flow: new_ProcessApproval_<guid>"
+            Write-Host "        ✓ Cloud flows: 2 enabled, 0 skipped"
+            Write-Host "    [B] Classic Dynamics 365 workflows (.xaml)"
+            Write-Host "        Found 1 classic workflow definition(s)"
+            Write-Host "        ✓ Bearer token acquired for Dataverse Web API"
+            Write-Host "        ▶ Activated: AutoAssignTicket (statecode: 0→1)"
+            Write-Host "        ✓ Classic workflows: 1 activated, 0 already active"
+
+            Write-Host "  ✅ [$sol] Deployed successfully → $envName"
+            Write-Host "::endgroup::"
+          }
+
+          # Write deploy status BEFORE potential exit
+          "SNOW_DEPLOY_STATUS=$($outcome.ToLower())" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host ""
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if ($outcome -eq 'failure') {
+            Write-Host "  ❌  SIMULATED FAILURE — testing SNOW failure closure path" -ForegroundColor Red
+            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            Write-Error "Simulated deployment failure for $($solutions -join ', ') → $envName"
+            exit 1
+          }
+          Write-Host "  ✅  All $($solutions.Count) solution(s) deployed → $envName"
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ══════════════════════════════════════════════════════════════════════
+      # SERVICENOW POST-DEPLOY SIMULATION  (Steps 12-14)
+      # Runs with if: always() — so CR is closed even on simulated failure
+      # ══════════════════════════════════════════════════════════════════════
+      - name: "🔔 ServiceNow — Post-Deploy (Close CR)"
+        if: always()
+        shell: pwsh
+        run: |
+          $envName      = '${{ inputs.environment_name }}'
+          $crNumber     = $env:SNOW_CHANGE_REQUEST_NUMBER
+          $crSysId      = $env:SNOW_CHANGE_REQUEST_ID
+          $deployStatus = $env:SNOW_DEPLOY_STATUS
+          $actor        = '${{ github.actor }}'
+          $runUrl       = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+
+          Write-Host ""
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          Write-Host "  🔔  ServiceNow — Post-Deploy | $envName"
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          Write-Host "  Change request : $crNumber  ($crSysId)"
+
+          # Step 12
+          Write-Host ""
+          Write-Host ":: Step 12 — Find pipeline approvers"
+          Start-Sleep -Seconds 1
+          Write-Host "  GET https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/approvals"
+          Write-Host "  → HTTP 200 OK"
+          Write-Host "  Approvers : $actor"
+          Write-Host "  PATCH .../change_request/$crSysId  (work notes: approvers added)"
+          Write-Host "  ✓ Approvers recorded in SNOW work notes"
+
+          # Step 13
+          Write-Host ""
+          Write-Host ":: Step 13 — Detect deployment status"
+          $deploySucceeded = $deployStatus -eq 'success'
+          Write-Host "  SNOW_DEPLOY_STATUS : $deployStatus"
+          Write-Host "  Deploy succeeded   : $deploySucceeded"
+
+          # Step 14
+          Write-Host ""
+          Write-Host ":: Step 14 — Close ServiceNow change request"
+          Start-Sleep -Seconds 1
+
+          if ($deploySucceeded) {
+            $closeCode  = 'successful'
+            $closeNotes = "Deployment to $envName completed SUCCESSFULLY.`n" +
+                          "Run #${{ github.run_number }} | Actor: $actor`n" +
+                          "Run URL: $runUrl"
+            $stateLabel = "Closed (Successful)"
+            $stateColour = "Green"
+          } else {
+            $closeCode  = 'unsuccessful'
+            $closeNotes = "Deployment to $envName FAILED (status: $deployStatus).`n" +
+                          "Run #${{ github.run_number }} | Actor: $actor`n" +
+                          "Review the run for details: $runUrl"
+            $stateLabel = "Closed (Unsuccessful)"
+            $stateColour = "Red"
+          }
+
+          Write-Host "  PATCH $env:SERVICENOWMURI/api/now/table/change_request/$crSysId"
+          Write-Host "  Payload: { close_code: '$closeCode', close_notes: '...', state: 'Closed' }"
+          Start-Sleep -Seconds 1
+          Write-Host "  → HTTP 200 OK"
+          Write-Host "  ✓ Change request closed" -ForegroundColor $stateColour
+          Write-Host "    CR         : $crNumber"
+          Write-Host "    Close code : $closeCode"
+          Write-Host "    State      : $stateLabel"
+
+          Write-Host ""
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          Write-Host "  ✅  ServiceNow Post-Deploy complete"
+          Write-Host "     CR : $crNumber  |  Status: $closeCode"
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ══════════════════════════════════════════════════════════════════════
+      # PIPELINE SUMMARY
+      # ══════════════════════════════════════════════════════════════════════
+      - name: "📋 Pipeline Summary"
+        if: always()
+        shell: bash
+        run: |
+          OUTCOME="${{ inputs.simulate_outcome }}"
+          ENV="${{ inputs.environment_name }}"
+          SOLUTIONS="${{ inputs.solution_list }}"
+          ICON="✅"
+          [ "$OUTCOME" = "failure" ] && ICON="❌"
+
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🧪 ServiceNow Integration — Full Simulation $ICON
+
+          | Field | Value |
+          |---|---|
+          | Environment | \`$ENV\` |
+          | Solutions | $SOLUTIONS |
+          | Simulated outcome | \`$OUTCOME\` |
+          | SNOW CR number | \`$SNOW_CHANGE_REQUEST_NUMBER\` |
+          | Run | #${{ github.run_number }} |
+          | Actor | @${{ github.actor }} |
+
+          ### Steps simulated
+          | Phase | Step | Result |
+          |---|---|---|
+          | Reveille | Azure OIDC login + AKV fetch (6 secrets) | ✅ |
+          | Reveille | Merge variables + JFrog PS repo | ✅ |
+          | Pre-Deploy | Load ServiceNow module | ✅ |
+          | Pre-Deploy | Set runtime env vars | ✅ |
+          | Pre-Deploy | Open change request | ✅ \`$SNOW_CHANGE_REQUEST_NUMBER\` |
+          | Pre-Deploy | Attach audit trail (SARIF) | ⏭ skipped — no sarif_path |
+          | Pre-Deploy | Set change window | ✅ |
+          | Pre-Deploy | Check conflict status | ✅ no conflicts |
+          | Pre-Deploy | Request approval | ✅ |
+          | Pre-Deploy | Poll approval status | ✅ approved |
+          | Deployment | Find + import + activate ($ENV) | $ICON |
+          | Post-Deploy | Find pipeline approvers | ✅ |
+          | Post-Deploy | Detect deployment status | ✅ \`$OUTCOME\` |
+          | Post-Deploy | Close change request | ✅ |
+
+          > Re-run with **simulate_outcome = failure** to test the error closure path.
+          EOF
