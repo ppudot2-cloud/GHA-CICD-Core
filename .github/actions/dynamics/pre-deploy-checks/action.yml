@@ -1,33 +1,30 @@
 # =============================================================================
-# COMPOSITE ACTION: Pre-Deploy Checks
+# COMPOSITE ACTION: Pre-Deploy Checks  (informational — never blocks the pipeline)
 # =============================================================================
 # Runs three optional safety checks before a solution is imported.
-# Each check is individually toggled by an input flag; all are skipped in
-# mock_deploy mode.
+# All checks are INFORMATIONAL: failures are emitted as ::warning:: annotations
+# and never cause the pipeline to stop. This lets operators see the environment
+# state without being blocked by advisory checks.
 #
-# CHECK 1 — Base solution presence (enable_blocking_check + base_solutions):
+# CHECK 1 — Base solution presence (base_solutions non-empty):
 #   Verifies that every solution listed in base_solutions is already installed
-#   in the target environment. Prevents import failures caused by missing
-#   dependencies that the solution package requires at import time.
+#   in the target environment. Warnings if any are missing (does NOT exit 1).
 #
 # CHECK 2 — Blocking async operations (enable_blocking_check):
-#   Calls Invoke-BlockingCheck.ps1, which queries the Dataverse asyncoperations
-#   API for in-progress imports, publishes, or upgrades. Issues a ::warning::
-#   annotation but does NOT block the pipeline — gives visibility so the operator
-#   can decide whether to wait or proceed.
+#   Calls Invoke-BlockingCheck.ps1 to detect in-progress Dataverse imports,
+#   publishes, or upgrades. Emits ::warning:: only — never blocks the pipeline.
 #
 # CHECK 3 — Version comparison (enable_version_compare):
-#   Calls Compare-SolutionVersion.ps1 to compare the artifact version against
-#   what is already deployed in the target environment. If the installed version
-#   is the same or newer, sets skip_import=true on GITHUB_OUTPUT so the calling
-#   job bypasses the import step entirely (idempotent re-deploy safety net).
+#   Calls Compare-SolutionVersion.ps1 to log whether the target environment
+#   already has the same or newer version. INFORMATIONAL ONLY — skip_import
+#   is always false so the import always proceeds regardless of version.
 #
 # OUTPUT:
-#   skip_import — 'true' if version compare determined no import is needed;
-#                 'false' otherwise (including when version compare is disabled).
+#   skip_import — always 'false' (import is never skipped by this action).
+#                 Kept for backward compatibility with callers that read it.
 # =============================================================================
 name: 'Pre-Deploy Checks'
-description: 'Runs blocking checks and version comparison before importing a solution'
+description: 'Informational pre-deploy safety checks — never blocks the pipeline'
 
 inputs:
   solution_name:
@@ -40,11 +37,11 @@ inputs:
     description: 'Artifact identifier used to derive version string'
     required: true
   enable_blocking_check:
-    description: 'Run blocking-check script (detects active flows, ownership locks, etc.)'
+    description: 'Run blocking-check script (detects active async ops)'
     required: false
     default: 'true'
   enable_version_compare:
-    description: 'Skip import if the same or higher version is already installed'
+    description: 'Log version comparison between artifact and installed version'
     required: false
     default: 'true'
   base_solutions:
@@ -58,58 +55,99 @@ inputs:
 
 outputs:
   skip_import:
-    description: 'true if version compare determined import should be skipped'
-    value: ${{ steps.version-compare.outputs.skip_import }}
+    description: 'Always false — import is never skipped by this action (informational mode)'
+    value: ${{ steps.set-output.outputs.skip_import }}
 
 runs:
   using: composite
   steps:
-    - name: Verify base solutions present
+
+    # ── CHECK 1: Base solution presence (informational) ──────────────────────
+    - name: Verify base solutions present (informational)
       if: ${{ inputs.base_solutions != '' && inputs.mock_deploy != 'true' }}
       shell: pwsh
       run: |
         $bases = "${{ inputs.base_solutions }}" -split ','
+        $missing = @()
         foreach ($base in $bases) {
           $base = $base.Trim()
-          Write-Host "Verifying base solution '$base' is installed in ${{ inputs.environment_url }}..."
-          # Uses PAC CLI — fails job if solution not found
-          pac solution list --environment "${{ inputs.environment_url }}" | Select-String $base
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Base solution '$base' not found in environment. Cannot proceed."
-            exit 1
+          if (-not $base) { continue }
+          Write-Host "Checking base solution '$base' in ${{ inputs.environment_url }}..."
+          $output = pac solution list --environment "${{ inputs.environment_url }}" 2>&1
+          if ($output -match [regex]::Escape($base)) {
+            Write-Host "  ✅ '$base' is installed"
+          } else {
+            $missing += $base
+            Write-Host "::warning::Base solution '$base' not found in ${{ inputs.environment_url }} — proceeding anyway (informational check)"
           }
         }
+        if ($missing.Count -gt 0) {
+          Write-Host "::warning::Missing base solutions: $($missing -join ', '). The import will still proceed — verify manually if needed."
+        }
 
-    - name: Run blocking check
+    # ── CHECK 2: Blocking async operations (informational) ───────────────────
+    - name: Run blocking check (informational)
       if: ${{ inputs.enable_blocking_check == 'true' && inputs.mock_deploy != 'true' }}
       shell: pwsh
       run: |
         $scriptPath = ".ci/.github/scripts/dynamics/Invoke-BlockingCheck.ps1"
-        & $scriptPath `
-          -EnvironmentUrl  "${{ inputs.environment_url }}" `
-          -EnvironmentName "${{ inputs.solution_name }}" `
-          -AppId           "${{ env.PP_APP_ID }}" `
-          -ClientSecret    "${{ env.PP_CLIENT_SECRET }}" `
-          -TenantId        "${{ env.PP_TENANT_ID }}"
+        if (-not (Test-Path $scriptPath)) {
+          Write-Host "::warning::Invoke-BlockingCheck.ps1 not found — skipping blocking check"
+          exit 0
+        }
+        # Script emits ::warning:: internally when blocking ops are found.
+        # We wrap it in try/catch so any unexpected failure is also just a warning.
+        try {
+          & $scriptPath `
+            -EnvironmentUrl  "${{ inputs.environment_url }}" `
+            -EnvironmentName "${{ inputs.solution_name }}" `
+            -AppId           "${{ env.PP_APP_ID }}" `
+            -ClientSecret    "${{ env.PP_CLIENT_SECRET }}" `
+            -TenantId        "${{ env.PP_TENANT_ID }}"
+        } catch {
+          Write-Host "::warning::Blocking check encountered an error: $_  — proceeding anyway (informational check)"
+        }
 
-    - name: Compare solution version
-      id: version-compare
+    # ── CHECK 3: Version comparison (informational, never skips import) ──────
+    - name: Compare solution version (informational)
       if: ${{ inputs.enable_version_compare == 'true' && inputs.mock_deploy != 'true' }}
       shell: pwsh
       run: |
         $scriptPath = ".ci/.github/scripts/dynamics/Compare-SolutionVersion.ps1"
-        $result = & $scriptPath `
-          -SolutionName           "${{ inputs.solution_name }}" `
-          -ArtifactFolder         "out/${{ inputs.solution_name }}" `
-          -PreviousEnvironmentUrl "${{ inputs.environment_url }}" `
-          -AppId                  "${{ env.PP_APP_ID }}" `
-          -ClientSecret           "${{ env.PP_CLIENT_SECRET }}" `
-          -TenantId               "${{ env.PP_TENANT_ID }}"
-        echo "skip_import=$result" >> $env:GITHUB_OUTPUT
+        if (-not (Test-Path $scriptPath)) {
+          Write-Host "::warning::Compare-SolutionVersion.ps1 not found — skipping version comparison"
+          exit 0
+        }
+        try {
+          # Run the comparison for logging purposes only.
+          # We discard the return value — skip_import is always false.
+          $result = & $scriptPath `
+            -SolutionName           "${{ inputs.solution_name }}" `
+            -ArtifactFolder         "out/${{ inputs.solution_name }}" `
+            -PreviousEnvironmentUrl "${{ inputs.environment_url }}" `
+            -AppId                  "${{ env.PP_APP_ID }}" `
+            -ClientSecret           "${{ env.PP_CLIENT_SECRET }}" `
+            -TenantId               "${{ env.PP_TENANT_ID }}"
+          if ($result -eq 'true') {
+            Write-Host "::notice::Version compare: same/newer version already installed in ${{ inputs.environment_url }} — import will still proceed (informational mode)"
+          } else {
+            Write-Host "  ✅ Version compare: new version ready to deploy"
+          }
+        } catch {
+          Write-Host "::warning::Version comparison encountered an error: $_ — proceeding anyway (informational check)"
+        }
 
+    # ── Mock mode ─────────────────────────────────────────────────────────────
     - name: Pre-deploy checks (mock)
       if: ${{ inputs.mock_deploy == 'true' }}
       shell: pwsh
       run: |
         Write-Host "[MOCK] Pre-deploy checks skipped — mock_deploy=true" -ForegroundColor Cyan
-        echo "skip_import=false" >> $env:GITHUB_OUTPUT
+
+    # ── Always output skip_import=false ───────────────────────────────────────
+    - name: Set skip_import output
+      id: set-output
+      shell: pwsh
+      run: |
+        # skip_import is always false — this action never suppresses an import.
+        "skip_import=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append

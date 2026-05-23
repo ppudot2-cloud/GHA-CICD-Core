@@ -10,8 +10,32 @@
 ## Table of Contents
 
 1. [GHA-Dynamics Workflows](#1-gha-dynamics-workflows)
+   - [build-and-deploy.yml — Pipeline 1](#build-and-deployyml--pipeline-1)
+   - [deploy-prod.yml — Pipeline 2](#deploy-prodyml--pipeline-2)
+   - [export-solution.yml — Standalone Export](#export-solutionyml--standalone-export)
+   - [test-servicenow.yml — ServiceNow Flow Simulation](#test-servicenowyml--servicenow-flow-simulation)
 2. [GHA-Core Reusable Workflows](#2-gha-core-reusable-workflows)
+   - [_stage-export.yml](#_stage-exportyml)
+   - [_stage-build.yml](#_stage-buildyml)
+   - [_job-build.yml](#_job-buildyml)
+   - [_stage-deploy-chain.yml](#_stage-deploy-chainyml)
+   - [_reusable-lint.yml — Config Linter (new)](#_reusable-lintyml--config-linter)
+   - [rollback.yml — Manual Rollback (new)](#rollbackyml--manual-rollback)
+   - [pipeline-test.yml — Pipeline Integration Test (new)](#pipeline-testyml--pipeline-integration-test)
 3. [GHA-Core Composite Actions](#3-gha-core-composite-actions)
+   - [reveille](#reveille)
+   - [pac-install](#pac-install)
+   - [servicenow-change](#servicenow-change)
+   - [pack-solution](#pack-solution)
+   - [solution-checker](#solution-checker)
+   - [export-config-data](#export-config-data)
+   - [export-solution](#export-solution)
+   - [import-solution](#import-solution)
+   - [deploy-all-solutions](#deploy-all-solutions)
+   - [pre-deploy-checks](#pre-deploy-checks)
+   - [post-deploy](#post-deploy)
+   - [verify-deployment](#verify-deployment)
+   - [jfrog-upload](#jfrog-upload)
 4. [GHA-Core PowerShell Scripts](#4-gha-core-powershell-scripts)
 5. [Configuration Files](#5-configuration-files)
 6. [Deployment Settings](#6-deployment-settings)
@@ -29,36 +53,45 @@ These are the entry-point workflows — the ones you trigger or that fire automa
 **Trigger:** `workflow_dispatch` (manual) or `push` to any `feature/**` branch (paths-ignore: pipeline-context.json)
 **Purpose:** Full build pipeline for non-production environments. Exports from sandbox, builds all solutions, deploys to Dev/Intg/UAT/FRS/Perf in parallel, then creates a PR to main.
 
-**Inputs:**
+**Inputs (workflow_dispatch):**
 
 | Input | Type | Default | Description |
 |---|---|---|---|
-| `mock_deploy` | boolean | false | Skip all Dataverse/JFrog operations; simulate the entire pipeline |
-| `enable_backup` | boolean | false | Take a pre-import backup at each environment before upgrading. If the import fails, the pipeline automatically re-imports the backup to restore the previous version. Recommended: `true` for UAT, FRS, Perf, Prod. |
-| `solutions` | string | `all` | "all" or comma-separated solution names to build and deploy. Must be declared with `type: string` in the workflow — GitHub only pre-fills `default` values when the type is explicitly set. |
+| `solutions` | string | `all` | "all" or comma-separated solution names to build and deploy |
 | `skip_export` | boolean | false | Skip sandbox export — build from source already committed to the current branch. Set automatically when triggered by a push event. |
+| `mock_deploy` | boolean | false | Skip all Dataverse/JFrog operations; simulate the entire pipeline |
 | `checker_error_level` | choice | `HighIssue` | Minimum severity that fails Solution Checker |
-| `base_solutions` | string | `''` | Comma-separated base solution names to verify are installed before deployment |
+| `base_solutions` | string | `''` | Comma-separated base solution names to verify are installed (informational only — never blocks) |
+| `run_pr_validation` | boolean | false | Run a build + Solution Checker check before the full pipeline. Always true on push events. |
+| `run_pipeline_tests` | boolean | false | Run the full `GHA-Core pipeline-test.yml` mock suite before proceeding. Adds ~5 min; use when testing Core changes. |
 
-> **ServiceNow:** Controlled per environment via `vars.SERVICENOW_ENABLED` (GitHub Environment variable), not a workflow input. Set to `true` on any environment to activate the full CR lifecycle. See [SECRETS_SETUP_GUIDE.md](./SECRETS_SETUP_GUIDE.md).
+> **Rollback:** Controlled by `ENABLE_ROLLBACK` GitHub Environment variable (set per environment — Dev, Intg, UAT, FRS, Perf, Prod). When `true`, the pipeline takes a pre-import backup and auto-restores on failure. There is no `enable_backup` dispatch input — rollback behaviour is always driven by the environment variable.
+
+> **ServiceNow:** Controlled per environment via `vars.SERVICENOW_ENABLED` (GitHub Environment variable). Set to `true` on any environment to activate the full CR lifecycle.
 
 **Job flow:**
 ```
-setup → stage-export → stage-build → deploy-dev    ┐
-                                  → deploy-intg   │ parallel
-                                  → deploy-uat    │
-                                  → deploy-frs    │
-                                  → deploy-perf   ┘
-       → create-main-pr (after deploy-uat succeeds)
-       → pipeline-summary (always)
+setup
+  → [optional] pr-validation     (push event OR run_pr_validation=true)
+  → [optional] pipeline-tests    (run_pipeline_tests=true)
+  → lint-config                  (calls GHA-Core _reusable-lint.yml — failure blocks export)
+  → stage-export                 (calls GHA-Core _stage-export.yml)
+  → stage-build                  (calls GHA-Core _stage-build.yml)
+  → deploy-dev    ┐
+  → deploy-intg   │ parallel (each with its own GitHub Environment approval gate)
+  → deploy-uat    │
+  → deploy-frs    │
+  → deploy-perf   ┘
+  → create-main-pr (after deploy-uat succeeds)
+  → pipeline-summary (always)
 ```
 
 **Key behaviours:**
 - `setup` runs `Resolve-SolutionMatrix.ps1` to read `solutions.json` and build the GitHub Actions matrix
-- `stage-export` calls `_stage-export.yml`; when triggered by a push event or when `skip_export=true`, the export jobs are skipped — the commit job still runs to write `pipeline-context.json` to the existing branch
-- `stage-build` calls `_stage-build.yml` which fans out to `_job-build.yml` per solution
+- `lint-config` calls `_reusable-lint.yml` in GHA-Core — validates solutions.json paths (now at `src/solutions/{Name}/deployment-settings-{env}.json`), project-vars.yml protected keys, unresolved tokens
+- `stage-export` calls `_stage-export.yml`; when triggered by a push event or when `skip_export=true`, the export jobs are skipped — the commit job still runs to write `pipeline-context.json`
+- `stage-build` calls `_stage-build.yml` which fans out to `_job-build.yml` per solution. Passes `vars.ENABLE_ROLLBACK` (not a dispatch input) to determine backup behaviour
 - All 5 deploy jobs run in parallel; each internally deploys solutions **sequentially** (Dataverse constraint)
-- `pipeline-context.json` is written by **stage-export's commit job** during the export stage
 - `create-main-pr` opens a PR to main via `gh pr create` after UAT deploy succeeds
 - `pipeline-summary` calls `Write-PipelineSummary.ps1` and sends failure email if any job failed
 
@@ -77,7 +110,11 @@ setup → stage-export → stage-build → deploy-dev    ┐
 | Input | Type | Default | Description |
 |---|---|---|---|
 | `mock_deploy` | boolean | false | Simulate UAT + Prod without touching Dataverse |
-| `enable_backup` | boolean | false | Take pre-import backups at UAT and Prod |
+| `skip_uat` | boolean | false | ⚠️ **Break-glass only.** Skip the UAT re-validation step and promote directly to Prod. Use only when UAT is unavailable. Prod environment approval gate still applies regardless. |
+
+> **Rollback:** Controlled by `ENABLE_ROLLBACK` GitHub Environment variable on the UAT and Prod environments (same as Pipeline 1). No `enable_backup` dispatch input.
+
+> **UAT bypass via variable:** In addition to the `skip_uat` dispatch input, setting the repo variable `SKIP_UAT=true` bypasses UAT even on auto-triggered push runs (when no dispatch input can be provided). Remember to unset `SKIP_UAT` after the emergency deployment.
 
 > **ServiceNow:** Controlled per environment via `vars.SERVICENOW_ENABLED` (GitHub Environment variable). Set to `true` on the UAT and Prod environments to activate ServiceNow for those deployments.
 
@@ -107,10 +144,13 @@ guard → read-context → deploy-uat → deploy-prod → pipeline-summary
 
 | Input | Type | Default | Description |
 |---|---|---|---|
-| `solution_name` | string | `''` | Specific solution to export; empty = all from solutions.json |
-| `commit_message` | string | `'chore: export'` | Git commit message prefix |
-| `create_pr` | boolean | true | Create a PR to main after export |
-| `mock_deploy` | boolean | false | Simulate export without connecting to PP sandbox |
+| `solutions` | string | `'all'` | "all" = every solution in solutions.json; or comma-separated subset: `"CoreSolution, ExtA"` |
+| `branch_name` | string | `''` | Feature branch to commit to. Blank = auto-generate as `feature/export-{run_number}` |
+| `create_pr` | boolean | true | Open a Pull Request to main after all exports complete |
+| `commit_message` | string | `'chore: export solution(s) from sandbox'` | Git commit message prefix |
+| `export_config_data` | boolean | false | Export Configuration Migration data for each solution alongside the solution itself |
+| `publish_before_export` | boolean | true | Publish all pending customizations in the sandbox environment before exporting |
+| `mock_deploy` | boolean | false | Dry-run — simulate the full export flow without PP credentials or Dataverse connections |
 
 **Job flow:**
 ```
@@ -118,33 +158,27 @@ setup → export (matrix, max-parallel:1) → create-pr
 ```
 
 **Key behaviours:**
-- `setup` resolves the feature branch name (format: `feature/pipeline-{run_number}`) and creates/switches to it
+- `setup` resolves the solution list via `Resolve-SolutionMatrix.ps1` and determines the feature branch name
 - `export` matrix runs each solution sequentially (`max-parallel: 1`) to avoid git commit conflicts
-- Each export iteration: PAC export → PAC unpack → `git pull --rebase` → `git commit` → `git push`
-- In mock mode, calls `Invoke-ExportCommitSim.ps1` to create stub solution files and commit without PAC CLI
-- `create-pr` only runs if `create_pr=true` and not mock mode
+- Each export iteration: (optional) PAC publish → PAC export → PAC unpack → `git pull --rebase` → `git commit` → `git push`
+- In mock mode: calls `Invoke-ExportCommitSim.ps1` to create stub solution files and commit without PAC CLI; no PP credentials required
+- `create-pr` only runs if `create_pr=true` and not mock mode; opens a single PR for all exported solutions
 
 ---
 
-### `pr-validation.yml` — PR Build Check
+---
 
-**Path:** `.github/workflows/pr-validation.yml`
-**Trigger:** Pull request events (opened, synchronize, reopened) targeting `main`
-**Purpose:** Validate that a PR builds successfully before merge. Build only — no deploy.
-
-**Key behaviours:**
-- Skips if PR is from a `feature/*` branch (those are Pipeline 1 PRs; only human code changes need validation)
-- Runs the full build chain (`_stage-build.yml`) including Solution Checker
-- Writes a build summary via `Write-PipelineSummary.ps1`
-- Failure blocks the PR merge (configure as a required status check in branch protection)
+> **Workflows removed from GHA-Dynamics in refactor:** `rollback.yml`, `lint-and-validate.yml`, `pipeline-test.yml`, and `pr-validation.yml` no longer exist as standalone workflows in GHA-Dynamics. They have moved to GHA-Core as reusable/standalone workflows. See Section 2 for their new locations.
 
 ---
 
 ### `test-servicenow.yml` — ServiceNow Flow Simulation
 
-**Path:** `.github/workflows/test-servicenow.yml`
-**Trigger:** `workflow_dispatch` only
+**Path:** `GHA-Core/.github/workflows/test-servicenow.yml`
+**Trigger:** `workflow_dispatch` only (run directly from the GHA-Core repository)
 **Purpose:** Fully self-contained simulation of the ServiceNow change management lifecycle. No Azure login, no Dataverse connection, no real SNOW API calls — every step is simulated with realistic output and timing. Use this to verify the 14-step ServiceNow CR flow and confirm env var handoff between pre-deploy and post-deploy phases before enabling ServiceNow on a real environment.
+
+> **Note:** This workflow lives in GHA-Core and is triggered directly from the GHA-Core repository Actions tab. It is not a caller workflow in GHA-Dynamics.
 
 **Inputs:**
 
@@ -206,7 +240,7 @@ Supports two modes: **normal** (exports from sandbox, creates `feature/pipeline-
 ### `_stage-build.yml`
 
 **Path:** `.github/workflows/_stage-build.yml`
-**Called by:** `build-and-deploy.yml`, `pr-validation.yml`
+**Called by:** `build-and-deploy.yml` (pr-validation job; stage-build job)
 **Purpose:** Build stage — fans out to `_job-build.yml` using a matrix strategy, one job per solution. Runs in parallel.
 
 **Key inputs:** `matrix`, `mock_deploy`, `jfrog_url`, `jfrog_repo`, `use_exported_source`, `checker_error_level`, `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`
@@ -219,11 +253,13 @@ Supports two modes: **normal** (exports from sandbox, creates `feature/pipeline-
 
 **Path:** `.github/workflows/_job-build.yml`
 **Called by:** `_stage-build.yml` (one instance per solution in the matrix)
-**Purpose:** Single-solution build job. Orchestrates: reveille → pac-install → optional artifact download → pack-solution → solution-checker → export-config-data → upload artifact → jfrog-upload → write summary.
+**Purpose:** Single-solution build job. Orchestrates: reveille → pac-install → optional artifact download → pack-solution → solution-checker → export-config-data → SBOM generation → upload artifact → jfrog-upload → write summary.
 
 **Key inputs:** `solution_name`, `solution_source_folder`, `use_exported_source`, `checker_error_level`, `data_schema_file`, `source_environment_url`, `mock_deploy`, `jfrog_url`, `jfrog_repo`, `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`
 
 **Outputs:** `solution_version`, `artifact_name`, `unmanaged_zip`, `managed_zip`, `checker_artifact_name`
+
+> **SBOM generation:** After `solution-checker` passes, `_job-build.yml` generates a Software Bill of Materials in CycloneDX v1.5 JSON format (`sbom-{solution_name}.json`) and uploads it as a GitHub artifact alongside the solution ZIPs. In mock mode, a stub SBOM is generated without scanning the actual solution. The SBOM is also included in the JFrog upload for artifact traceability.
 
 ---
 
@@ -236,6 +272,121 @@ Supports two modes: **normal** (exports from sandbox, creates `feature/pipeline-
 Accepts an `environments` filter input (comma-separated) to deploy only a subset of environments. Per-environment config is passed as compact JSON objects (`dev_config`, `intg_config`, etc.).
 
 **Key inputs:** `matrix`, `mock_deploy`, `environments`, `source_run_id`, `base_solutions`, `jfrog_url`, `jfrog_repo`, `run_number`, `run_attempt`, `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`, plus per-env config objects (`dev_config`, `intg_config`, `uat_config`, `frs_config`, `perf_config`, `prod_config`)
+
+---
+
+### `_reusable-lint.yml` — Config Linter
+
+**Path:** `.github/workflows/_reusable-lint.yml`
+**Called by:** `build-and-deploy.yml` (`lint-config` job) via `uses: ppudot2-cloud/GHA-Core/.github/workflows/_reusable-lint.yml@main`
+**Standalone trigger:** Not directly dispatchable — call it from GHA-Dynamics or run `pipeline-test.yml` which covers lint indirectly.
+**Purpose:** Validates all pipeline configuration files before the export stage begins. Catches misconfiguration early, before any Dataverse or JFrog operations start. Failures block pipeline progression.
+
+**What is validated:**
+
+| Check | Behaviour on failure |
+|---|---|
+| `solutions.json` — valid JSON syntax | ❌ Error (hard fail) |
+| `solutions.json` — required fields (`name`, `folder`, `deployOrder`, `deploymentSettings`) | ❌ Error |
+| `solutions.json` — `folder` path exists on disk | ❌ Error |
+| `solutions.json` — `dataSchemaFile` exists and is valid XML (when non-empty) | ❌ Error |
+| `solutions.json` — `deployOrder` values are positive integers, no duplicates | ❌ Error |
+| `solutions.json` — `dependsOn` references resolve to declared solution names | ⚠️ Warning |
+| Deployment-settings files — all paths in `deploymentSettings` exist on disk | ❌ Error |
+| Deployment-settings files — valid JSON with `EnvironmentVariables` and `ConnectionReferences` arrays | ❌ Error |
+| Deployment-settings files — paths follow `src/solutions/{Name}/deployment-settings-{env}.json` convention | ⚠️ Warning |
+| Deployment-settings files — unresolved `#{TOKEN}#` tokens | ⚠️ Warning |
+| `project-vars.yml` — valid YAML | ❌ Error |
+| `project-vars.yml` — does not declare protected keys (`PP_CHECKER_GEO`, `PP_CHECKER_ERROR_LEVEL`, `DEFAULT_SOLUTION_TYPE`, `ENABLE_BACKUP`, `ENABLE_ROLLBACK`) | ❌ Error |
+| `project-vars.yml` — no credential-like values (password, secret, token, key, apikey, pwd) | ⚠️ Warning |
+
+**Inputs (workflow_call):**
+
+| Input | Default | Description |
+|---|---|---|
+| `solutions_json_path` | `solutions.json` | Path to solutions.json in the calling repo |
+| `project_vars_path` | `.github/config/project-vars.yml` | Path to project-vars.yml in the calling repo |
+
+**Output:** Emits `::error::` GitHub annotations for all errors (visible inline on PR diffs), `::warning::` for warnings. Writes a lint summary table to `$GITHUB_STEP_SUMMARY`. Fails the job if any errors are found; warnings do not fail the job.
+
+---
+
+### `rollback.yml` — Manual Rollback
+
+**Path:** `.github/workflows/rollback.yml`
+**Trigger:** `workflow_dispatch` only (run directly from the GHA-Core repository Actions tab)
+**Purpose:** Manual rollback of a previously deployed solution to a specific Power Platform environment. Downloads the backup artifact from a prior pipeline run and re-imports it using PAC CLI. All processing lives in GHA-Core; GHA-Dynamics has no rollback workflow.
+
+> **Auto-rollback vs Manual rollback:** When `ENABLE_ROLLBACK=true` is set on a GitHub Environment (Dev/Intg/UAT/FRS/Perf/Prod), `deploy-all-solutions` automatically backs up and restores on import failure — no manual intervention required. This manual workflow is for situations where you need to roll back after a successful deploy (e.g. a post-deploy regression was found).
+
+**Inputs:**
+
+| Input | Type | Required | Description |
+|---|---|---|---|
+| `environment` | choice | ✅ | Target environment: `Dev`, `Intg`, `UAT`, `FRS`, `Perf`, `Prod` |
+| `environment_url` | string | ✅ | Power Platform environment URL (e.g. `https://contoso.crm.dynamics.com`) |
+| `source_repo` | string | ✅ | GHA-Dynamics repo that produced the backup artifact (format: `org/repo`) |
+| `source_run_id` | string | ✅ | GitHub Actions run ID from which to download the backup artifact |
+| `backup_artifact_name` | string | ✅ | Name of the backup artifact (e.g. `backup-Dev-v42`) |
+| `azure_client_id` | string | ✅ | OIDC App Registration client ID |
+| `azure_tenant_id` | string | ✅ | Azure AD tenant ID |
+| `azure_subscription_id` | string | ✅ | Azure subscription ID |
+| `azure_key_vault_name` | string | ✅ | Key Vault name holding PP credentials |
+| `mock_deploy` | boolean | — | Simulate the rollback without touching Dataverse |
+| `confirm` | string | ✅ | Type the environment name exactly to confirm (safety gate, e.g. `Prod`) |
+
+**Job flow:**
+```
+validate (confirm == environment check)
+  → rollback (OIDC login → AKV fetch → PAC install → download artifact → Invoke-Rollback.ps1)
+```
+
+**Key behaviours:**
+- `validate` job aborts immediately if `confirm` does not exactly match `environment` — prevents accidental rollbacks
+- `rollback` job uses OIDC (`id-token: write`) to authenticate to Azure and fetch PP credentials from Key Vault
+- `Invoke-Rollback.ps1` re-imports the backup ZIP using PAC CLI (`pac solution import`) with the deployment settings from the backup artifact
+- In mock mode, logs all steps without making Dataverse API calls
+- Backup artifacts are uploaded by `deploy-all-solutions` and retained for 30 days (`retention-days: 30`)
+
+---
+
+### `pipeline-test.yml` — Pipeline Integration Test
+
+**Path:** `.github/workflows/pipeline-test.yml`
+**Called by:** `build-and-deploy.yml` (`pipeline-tests` job) when `run_pipeline_tests=true`, via `uses: ppudot2-cloud/GHA-Core/.github/workflows/pipeline-test.yml@main`
+**Standalone triggers:** `pull_request` to `main` (paths: `.github/workflows/**`, `.github/actions/**`, `.github/scripts/**`); `push` to `main` (paths: `.github/workflows/**`, `.github/actions/**`); `workflow_dispatch`
+**Purpose:** Verifies the complete pipeline flow end-to-end in mock mode. No Dataverse changes, no Azure login, no JFrog upload. Cost: zero. Run this when modifying GHA-Core scripts, actions, or workflows, or when onboarding a new GHA-Dynamics project.
+
+**What it validates:**
+- `solutions.json` resolves correctly via `Resolve-SolutionMatrix.ps1`
+- `_stage-build.yml` can be called with current inputs
+- Mock build: version stamp, pack, Solution Checker simulation
+- Mock deploy: `deploy-all-solutions` composite action end-to-end
+- All PowerShell scripts (unit tests) pass via Pester
+
+**Inputs (workflow_call and workflow_dispatch):**
+
+| Input | Default | Description |
+|---|---|---|
+| `solutions` | `all` | Solutions to test ("all" or comma-separated) |
+| `caller_repo` | `''` | GHA-Dynamics repo to test against (`org/repo`). When specified, checks out that repo for `solutions.json`. Leave blank to use the built-in test fixture. |
+
+**Job flow:**
+```
+setup
+  → pester-unit-tests  (parallel)
+  → mock-build         (parallel — calls _stage-build.yml@main with mock_deploy=true)
+  → mock-deploy-dev    (calls deploy-all-solutions with mock_deploy=true)
+  → test-summary       (always — writes pass/fail table to step summary)
+```
+
+**Key behaviours:**
+- When `caller_repo` is set, checks out that repo's `solutions.json` so real project solutions are tested
+- When `caller_repo` is empty (standalone mode), creates a minimal `CoreSolution` test fixture
+- `mock-build` calls `_stage-build.yml` with empty Azure inputs — no OIDC or AKV required
+- `mock-deploy-dev` downloads the mock build artifacts and runs `deploy-all-solutions` with a mock Dev URL
+- `test-summary` job uses `if: always()` — always writes results and exits non-zero if any job failed
+- Pester test results uploaded as `pester-results-run{N}` artifact (30-day retention)
 
 ---
 
@@ -434,7 +585,9 @@ For each solution (in order):
 
 On failure (catch block): if `enable_backup=true` and a backup ZIP was taken (i.e. this was an upgrade), the pipeline **immediately re-imports the backup** to restore the previous version — no manual intervention required. First-install failures are not rolled back (nothing to restore to).
 
-After loop: uploads `backup-{env}-v{run_number}` GitHub artifact (30-day retention) for audit purposes.
+> **`enable_backup` is controlled by the `ENABLE_ROLLBACK` GitHub Environment variable** (set per environment in GitHub Settings → Environments), not by a workflow dispatch input. The caller passes `vars.ENABLE_ROLLBACK == 'true'` as the `enable_backup` input value. This means rollback behaviour is configured at the environment level and applies equally to both auto-triggered and manually dispatched pipeline runs.
+
+After loop: uploads `backup-{env}-v{run_number}` GitHub artifact (30-day retention) for audit purposes. Also writes a **structured audit log** (JSON) to `$GITHUB_STEP_SUMMARY` and optionally appends to an `audit-log-{env}-v{run_number}` artifact. The audit log records: timestamp, environment, solution name, version, import result, backup taken/restored, config data imported, flows activated, ServiceNow CR number (if enabled), and approvers. This provides a tamper-evident deployment trail for compliance evidence.
 
 **Key inputs:** `solutions_json`, `environment_name`, `environment_url`, `solution_type`, `enable_backup`, `enable_blocking_check`, `enable_version_compare`, `import_config_data`, `tag_prod_deployed`, `activate_flows`, `mock_deploy`, `base_solutions`, `jfrog_url`, `jfrog_repo`, `run_number`, `run_attempt`, `enable_servicenow`, `solution_list`, `sarif_path`
 
@@ -453,13 +606,23 @@ The deploy loop writes `SNOW_DEPLOY_STATUS=success` or `SNOW_DEPLOY_STATUS=failu
 ### `pre-deploy-checks`
 
 **Path:** `.github/actions/dynamics/pre-deploy-checks/action.yml`
-**Purpose:** Pre-import validation for a single solution.
+**Purpose:** Informational pre-import checks for a single solution. **None of these checks ever stop the pipeline.** All results are logged as warnings or informational output only. The `skip_import` output is always `false`.
+
+> **Why informational-only?** Pre-flight checks surface useful context (blocking ops, version already installed, base solution gaps) but should never prevent a deployment from proceeding. Operators who need to act on a warning can review the logs and re-run manually. Blocking on advisory checks causes more pipeline friction than the issues they prevent.
 
 Steps:
-1. `Invoke-BlockingCheck.ps1` — abort if in-progress async operations in target environment
-2. `Compare-SolutionVersion.ps1` — compare artifact version vs installed version
+1. **Base solution check** — verifies that solutions listed in `base_solutions` are installed in the target environment. Missing base solutions emit `::warning::` annotations. Import proceeds regardless.
+2. **Blocking check** — calls `Invoke-BlockingCheck.ps1` to query in-progress async operations. Wrapped in `try/catch`; any failure or blocking ops found emits a `::warning::`. Import proceeds regardless.
+3. **Version compare** — calls `Compare-SolutionVersion.ps1` to compare artifact version vs installed version. Result is logged for visibility. `skip_import` is **never** set to `true` — import always proceeds.
+4. **Set output** — always writes `skip_import=false` to `$GITHUB_OUTPUT`.
 
-**Inputs:** `solution_name`, `environment_url`, `artifact_version`, `previous_environment_url`, `mock_deploy`
+**Inputs:** `solution_name`, `environment_url`, `artifact_version`, `base_solutions`, `previous_environment_url`, `mock_deploy`
+
+**Outputs:**
+
+| Output | Value | Description |
+|---|---|---|
+| `skip_import` | always `false` | Import is never skipped by this action — informational only |
 
 ---
 
@@ -473,6 +636,41 @@ Steps:
 2. `Write-DeploySummary.ps1` — writes deploy result markdown table to step summary
 
 **Inputs:** `solution_name`, `solution_version`, `environment_name`, `environment_url`, `artifact_name`, `mock_deploy`, `skip_import`, `jfrog_url`, `jfrog_repo`, `run_number`, `run_attempt`
+
+---
+
+### `verify-deployment`
+
+**Path:** `.github/actions/dynamics/verify-deployment/action.yml`
+**Used by:** `deploy-all-solutions` action (called once per solution after a successful import)
+**Purpose:** Post-deploy health check — confirms the solution is actually live in Dataverse, at the correct version, with no blocking async operations remaining.
+
+**Checks performed:**
+1. **Solution exists** — `pac solution list` confirms the solution is present in the target environment
+2. **Version matches** — deployed version in Dataverse matches the artifact's expected version string (catches silent rollbacks by Dataverse upgrade mechanism)
+3. **No async blocking** — no in-progress async operations remain that would indicate an incomplete upgrade
+
+**Outputs:**
+
+| Output | Description |
+|---|---|
+| `deployed_version` | Actual version found in the target environment after deployment |
+| `health_status` | `"healthy"`, `"version_mismatch"`, `"async_blocked"`, `"not_found"`, or `"simulated"` |
+
+**Inputs:**
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `solution_name` | ✅ | — | Solution unique name to verify |
+| `expected_version` | ✅ | — | Version string that should be live (e.g. `1.2.3.4`) |
+| `environment_url` | ✅ | — | Target Dataverse environment URL |
+| `app_id` | — | `''` | Service principal client ID (from `$env:PP_APP_ID` set by reveille) |
+| `client_secret` | — | `''` | Service principal client secret (from `$env:PP_CLIENT_SECRET`) |
+| `tenant_id` | — | `''` | Azure AD tenant ID (from `$env:PP_TENANT_ID`) |
+| `mock_deploy` | — | `false` | Simulate all checks without real Dataverse calls |
+| `max_wait_seconds` | — | `120` | Seconds to wait for async ops to clear before failing |
+
+On failure: writes `::error::` annotations and exits 1, failing the calling job.
 
 ---
 
@@ -493,7 +691,7 @@ All scripts are in `.github/scripts/dynamics/`. On the runner they are at `.ci/.
 
 ### `Resolve-SolutionMatrix.ps1`
 
-**Called by:** `setup` jobs in `build-and-deploy.yml`, `export-solution.yml`, `pr-validation.yml`
+**Called by:** `setup` jobs in `build-and-deploy.yml`, `export-solution.yml`, `pipeline-test.yml`
 **Purpose:** Reads `solutions.json`, sorts by `deployOrder`, builds the GitHub Actions matrix JSON.
 
 Outputs to `$GITHUB_OUTPUT`:
@@ -610,7 +808,7 @@ In mock mode: logs what would have been uploaded/tagged without making network c
 
 ### `Write-PipelineSummary.ps1`
 
-**Called by:** `pipeline-summary` jobs in `build-and-deploy.yml` and `pr-validation.yml`
+**Called by:** `pipeline-summary` jobs in `build-and-deploy.yml` and `deploy-prod.yml`
 **Purpose:** Aggregates all per-job JSON records from `JobSummariesDir` and writes the final consolidated pipeline summary to `$GITHUB_STEP_SUMMARY`. Shows all solutions, all environments, build results, and deploy results in a single table.
 
 **Parameters:** `-SolutionList`, `-SolutionCount`, `-RunNumber`, `-RefName`, `-CommitSha`, `-ExportResult`, `-BuildResult`, `-DeployResult`, `-JobSummariesDir`
@@ -632,14 +830,14 @@ In mock mode: logs what would have been uploaded/tagged without making network c
       "folder": "src/solutions/CoreSolution",  // Path to unpacked source
       "deployOrder": 1,                   // Sequential deploy position (1 = first)
       "dependsOn": [],                    // Documentation only, no functional effect
-      "dataSchemaFile": "config/CoreSolution/data-schema.xml",  // Empty = skip
+      "dataSchemaFile": "src/solutions/CoreSolution/config-data-schema.xml",  // Empty = skip
       "deploymentSettings": {
-        "dev":  "deployment-settings/dev/CoreSolution.json",
-        "intg": "deployment-settings/intg/CoreSolution.json",
-        "uat":  "deployment-settings/uat/CoreSolution.json",
-        "frs":  "deployment-settings/frs/CoreSolution.json",
-        "perf": "deployment-settings/perf/CoreSolution.json",
-        "prod": "deployment-settings/prod/CoreSolution.json"
+        "dev":  "src/solutions/CoreSolution/deployment-settings-dev.json",
+        "intg": "src/solutions/CoreSolution/deployment-settings-intg.json",
+        "uat":  "src/solutions/CoreSolution/deployment-settings-uat.json",
+        "frs":  "src/solutions/CoreSolution/deployment-settings-frs.json",
+        "perf": "src/solutions/CoreSolution/deployment-settings-perf.json",
+        "prod": "src/solutions/CoreSolution/deployment-settings-prod.json"
       }
     }
   ]
@@ -651,6 +849,7 @@ In mock mode: logs what would have been uploaded/tagged without making network c
 - Every solution in `src/solutions/` should have an entry; unlisted solutions are ignored
 - `dependsOn` is metadata for documentation — it does NOT control deploy order; use `deployOrder` for that
 - `dataSchemaFile: ""` skips config data export/import for that solution
+- All paths follow the `src/solutions/{Name}/` convention — deployment settings and config data schema are co-located with the solution source files. The `_reusable-lint.yml` linter warns if paths deviate from this convention.
 
 ---
 
@@ -687,7 +886,9 @@ In mock mode: logs what would have been uploaded/tagged without making network c
 
 ### Format
 
-**Path:** `GHA-Dynamics/deployment-settings/{env}/{SolutionName}.json`
+**Path:** `GHA-Dynamics/src/solutions/{SolutionName}/deployment-settings-{env}.json`
+
+Deployment settings are co-located with the solution source files inside `src/solutions/{Name}/`. Each solution has one file per environment (`dev`, `intg`, `uat`, `frs`, `perf`, `prod`), all living in the same folder as the unpacked solution XML/JSON. This eliminates the old `deployment-settings/{env}/` root folder.
 
 ```json
 {
@@ -748,19 +949,21 @@ protected_keys:
   - PP_CHECKER_ERROR_LEVEL
   - DEFAULT_SOLUTION_TYPE
   - ENABLE_BACKUP
+  - ENABLE_ROLLBACK
 
 variables:
   PP_CHECKER_GEO:         "UnitedStates"
   PP_CHECKER_ERROR_LEVEL: "HighIssue"
   JFROG_REPO:             "powerplatform-solutions"
   DEFAULT_SOLUTION_TYPE:  "managed"
-  ENABLE_BACKUP:          "true"
   ENABLE_BLOCKING_CHECK:  "true"
   MOCK_DEPLOY:            "false"
   SOLUTION_IMPORT_MAX_WAIT_MINUTES: "60"
   SOLUTION_CHECKER_TIMEOUT_MINUTES: "10"
   JFROG_UPLOAD_ENABLED:   "true"
 ```
+
+> **`ENABLE_ROLLBACK` is a GitHub Environment variable, not a global-vars.yml variable.** Set it per environment (Dev, Intg, UAT, FRS, Perf, Prod) in GitHub Settings → Environments. When `true`, the pipeline takes a pre-import backup and automatically restores on import failure. It is listed as a protected key to prevent project-vars.yml from accidentally shadowing it — rollback behaviour must be controlled at the environment level, not from a global config file.
 
 ### `project-vars.yml`
 

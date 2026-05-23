@@ -3,879 +3,1157 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GHA — Power Platform CI/CD — E2E Pipeline Flow</title>
+<title>GHA Power Platform CI/CD — End-to-End Flow</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;font-size:13px;min-height:100vh}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;font-size:13px;min-height:100vh;display:flex}
 a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}
+code{font-family:'SF Mono',Consolas,'Courier New',monospace;font-size:11px;background:#161b22;border:1px solid #30363d;border-radius:3px;padding:1px 5px;color:#79c0ff}
 
-/* ── Header ── */
-.hdr{background:linear-gradient(135deg,#0f172a 0%,#1a2d4a 100%);border-bottom:1px solid #30363d;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
-.hdr-left{display:flex;align-items:center;gap:14px}
-.hdr-icon{font-size:30px}
-.hdr-title{font-size:18px;font-weight:700;color:#f0f6ff}
-.hdr-sub{font-size:11px;color:#8b949e;margin-top:3px}
-.badges{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
-.badge{font-size:10px;font-weight:600;padding:3px 9px;border-radius:12px}
+/* ── Sidebar ── */
+.sidebar{width:220px;flex-shrink:0;background:#010409;border-right:1px solid #21262d;height:100vh;position:sticky;top:0;overflow-y:auto;padding:16px 0}
+.sidebar-logo{padding:12px 16px 16px;border-bottom:1px solid #21262d;margin-bottom:8px}
+.sidebar-logo .logo-title{font-size:13px;font-weight:700;color:#f0f6ff;line-height:1.4}
+.sidebar-logo .logo-sub{font-size:10px;color:#6e7681;margin-top:2px}
+.nav-group{margin-bottom:4px}
+.nav-group-label{font-size:10px;font-weight:600;color:#6e7681;padding:6px 16px 4px;text-transform:uppercase;letter-spacing:.5px}
+.nav-item{display:block;padding:5px 16px 5px 20px;font-size:12px;color:#8b949e;cursor:pointer;border-left:2px solid transparent;transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-item:hover{color:#c9d1d9;background:rgba(255,255,255,.03);border-left-color:#444d58}
+.nav-item.active{color:#58a6ff;background:rgba(56,139,253,.07);border-left-color:#58a6ff}
+
+/* ── Main ── */
+.main{flex:1;min-width:0;overflow-y:auto;height:100vh}
+.content{max-width:1100px;margin:0 auto;padding:24px 28px 80px}
+
+/* ── Section ── */
+.section{margin-bottom:56px;scroll-margin-top:20px}
+.section-title{font-size:20px;font-weight:700;color:#f0f6ff;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+.section-sub{font-size:13px;color:#8b949e;margin-bottom:20px;line-height:1.6;max-width:800px}
+.section-divider{border:none;border-top:1px solid #21262d;margin:48px 0}
+
+/* ── Hero ── */
+.hero{background:linear-gradient(135deg,#0f172a,#1a2d4a 60%,#12231a);border:1px solid #30363d;border-radius:12px;padding:28px 32px;margin-bottom:32px}
+.hero h1{font-size:22px;font-weight:800;color:#f0f6ff;margin-bottom:8px}
+.hero p{font-size:13px;color:#8b949e;line-height:1.7;max-width:720px}
+.badge-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.badge{font-size:10px;font-weight:600;padding:3px 10px;border-radius:12px}
 .b-blue{background:rgba(56,139,253,.15);color:#79c0ff;border:1px solid rgba(56,139,253,.3)}
 .b-green{background:rgba(46,160,67,.15);color:#56d364;border:1px solid rgba(46,160,67,.3)}
 .b-amber{background:rgba(187,128,9,.15);color:#e3b341;border:1px solid rgba(187,128,9,.3)}
-.b-purple{background:rgba(130,80,255,.15);color:#c084fc;border:1px solid rgba(130,80,255,.3)}
+.b-purple{background:rgba(130,80,255,.15);color:#c084fc;border:1px solid rgba(130,80,255,.25)}
 .b-red{background:rgba(248,81,73,.15);color:#ff7b72;border:1px solid rgba(248,81,73,.3)}
 
-/* ── Layout ── */
-.page{max-width:1400px;margin:0 auto;padding:20px 16px 60px}
-.pipeline-section{margin-bottom:44px}
-.pipeline-title{font-size:15px;font-weight:700;color:#f0f6ff;padding:10px 16px 10px 0;border-bottom:2px solid #21262d;margin-bottom:20px;display:flex;align-items:center;gap:10px}
-.pipeline-title .pt-file{font-size:11px;font-weight:400;color:#8b949e;font-family:'SF Mono',Consolas,monospace}
-.pipeline-title .pt-trigger{font-size:11px;color:#56d364;background:rgba(46,160,67,.12);border:1px solid rgba(46,160,67,.25);border-radius:10px;padding:2px 8px;margin-left:6px}
+/* ── Callout box ── */
+.callout{border-left:3px solid #58a6ff;background:rgba(56,139,253,.07);border-radius:0 6px 6px 0;padding:10px 14px;margin:14px 0;font-size:12px;color:#c9d1d9;line-height:1.6}
+.callout.warn{border-color:#e3b341;background:rgba(187,128,9,.07)}
+.callout.success{border-color:#56d364;background:rgba(46,160,67,.07)}
+.callout strong{color:#f0f6ff}
 
-/* ── Flow row ── */
-.flow-row{display:flex;align-items:flex-start;gap:0;flex-wrap:wrap}
-.flow-connector{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 4px;min-width:28px;padding-top:22px}
-.flow-arrow{color:#444d58;font-size:18px;line-height:1}
-.flow-arrow-label{font-size:9px;color:#6e7681;text-align:center;white-space:nowrap;margin-top:2px}
-.parallel-group{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
-.parallel-brace{display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:22px;color:#444d58;font-size:20px;padding:22px 2px 0}
+/* ── Flow diagram ── */
+.flow-diagram{background:#0a0d12;border:1px solid #21262d;border-radius:10px;padding:20px;margin:16px 0;overflow-x:auto}
+.flow-diagram pre{font-family:'SF Mono',Consolas,monospace;font-size:11px;color:#8b949e;line-height:1.7;white-space:pre}
+.hi-blue{color:#58a6ff}.hi-green{color:#56d364}.hi-amber{color:#e3b341}.hi-red{color:#ff7b72}.hi-purple{color:#c084fc}.hi-cyan{color:#79c0ff}
 
-/* ── Job card ── */
-.job-card{background:#161b22;border:1px solid #30363d;border-radius:8px;width:230px;min-width:200px;flex-shrink:0;overflow:hidden;transition:border-color .2s,box-shadow .2s}
-.job-card:hover{border-color:#58a6ff;box-shadow:0 0 0 2px rgba(88,166,255,.1)}
-.job-card.wide{width:290px}
-.job-card.narrow{width:180px}
+/* ── Pipeline visual flow ── */
+.pipe-flow{display:flex;flex-wrap:wrap;align-items:flex-start;gap:0;margin:16px 0;overflow-x:auto;padding-bottom:8px}
+.pipe-arrow{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:32px;color:#444d58;font-size:16px;padding-top:26px}
+.pipe-arrow small{font-size:9px;color:#6e7681;text-align:center;white-space:nowrap;margin-top:2px}
+.pipe-parallel-label{font-size:9px;color:#6e7681;text-align:center;padding:0 8px;margin-bottom:2px}
 
-.job-header{padding:10px 12px 8px;cursor:pointer;user-select:none;display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
-.job-header:hover .job-toggle{color:#58a6ff}
-.job-emoji{font-size:16px;line-height:1;flex-shrink:0;margin-top:1px}
-.job-info{flex:1;min-width:0}
-.job-name{font-size:12px;font-weight:600;color:#f0f6ff;line-height:1.3}
-.job-meta{font-size:10px;color:#6e7681;margin-top:3px;line-height:1.4}
-.job-meta span{display:block}
-.job-toggle{color:#6e7681;font-size:11px;flex-shrink:0;transition:transform .2s}
+.job-box{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:0;min-width:155px;max-width:195px;overflow:hidden;flex-shrink:0;transition:border-color .2s}
+.job-box:hover{border-color:#58a6ff}
+.job-box-hdr{padding:9px 12px 8px;cursor:pointer;user-select:none;display:flex;align-items:flex-start;gap:8px}
+.job-emoji{font-size:15px;flex-shrink:0;margin-top:1px}
+.job-name{font-size:11px;font-weight:600;color:#f0f6ff;line-height:1.3}
+.job-meta{font-size:10px;color:#6e7681;margin-top:2px}
+.job-toggle{color:#6e7681;font-size:10px;margin-left:auto;transition:transform .2s;flex-shrink:0}
 .job-toggle.open{transform:rotate(180deg);color:#58a6ff}
-
-.job-body{display:none;border-top:1px solid #21262d}
+.job-body{display:none;border-top:1px solid #21262d;padding:8px 12px}
 .job-body.open{display:block}
+.job-body p{font-size:10px;color:#8b949e;line-height:1.55;margin-bottom:6px}
+.job-body p:last-child{margin-bottom:0}
 
-.job-condition{font-size:10px;color:#e3b341;background:rgba(187,128,9,.1);border-bottom:1px solid #21262d;padding:5px 12px;font-family:'SF Mono',Consolas,monospace}
-.job-purpose{font-size:10px;color:#8b949e;padding:6px 12px;border-bottom:1px solid #21262d;line-height:1.5}
+/* border colours */
+.jb-setup .job-box-hdr{border-left:3px solid #58a6ff}
+.jb-export .job-box-hdr{border-left:3px solid #e3b341}
+.jb-build .job-box-hdr{border-left:3px solid #79c0ff}
+.jb-dev .job-box-hdr{border-left:3px solid #56d364}
+.jb-managed .job-box-hdr{border-left:3px solid #3fb950}
+.jb-uat .job-box-hdr{border-left:3px solid #ff9f0a}
+.jb-prod .job-box-hdr{border-left:3px solid #ff7b72}
+.jb-pr .job-box-hdr{border-left:3px solid #c084fc}
+.jb-summary .job-box-hdr{border-left:3px solid #6e7681}
+.jb-guard .job-box-hdr{border-left:3px solid #ff7b72}
+.jb-test .job-box-hdr{border-left:3px solid #e3b341}
 
-/* ── Steps ── */
-.steps-list{padding:6px 0 8px}
-.step-item{padding:4px 12px;display:flex;align-items:flex-start;gap:7px}
-.step-item:hover{background:rgba(255,255,255,.03)}
-.step-num{font-size:9px;font-weight:700;color:#58a6ff;background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.25);border-radius:3px;padding:1px 4px;flex-shrink:0;margin-top:1px;font-family:'SF Mono',Consolas,monospace;min-width:22px;text-align:center}
-.step-content{flex:1;min-width:0}
-.step-name{font-size:11px;font-weight:500;color:#c9d1d9;cursor:pointer;display:flex;align-items:center;gap:5px}
-.step-name:hover{color:#79c0ff}
-.step-expand-icon{font-size:9px;color:#6e7681;transition:transform .15s}
-.step-expand-icon.open{transform:rotate(90deg);color:#58a6ff}
-.step-details{display:none;margin-top:5px;padding-left:2px;border-left:2px solid #21262d}
-.step-details.open{display:block}
-.step-detail-item{font-size:10px;color:#8b949e;line-height:1.55;padding:2px 0 2px 8px;border-bottom:1px solid rgba(255,255,255,.04)}
-.step-detail-item:last-child{border-bottom:0}
-.step-detail-item code{font-family:'SF Mono',Consolas,monospace;font-size:9px;background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:0 3px;color:#79c0ff}
-.step-detail-item em{color:#e3b341;font-style:normal}
-.step-detail-item strong{color:#56d364;font-weight:500}
-.step-ref{font-size:10px;color:#6e7681;font-style:italic;padding-left:2px;margin-top:2px}
-.step-tag{font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:600}
+/* ── Workflow card ── */
+.wf-card{background:#161b22;border:1px solid #30363d;border-radius:8px;overflow:hidden;margin-bottom:16px}
+.wf-card-hdr{padding:14px 16px;cursor:pointer;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;user-select:none}
+.wf-card-hdr:hover{background:rgba(255,255,255,.02)}
+.wf-card-left{display:flex;gap:12px;align-items:flex-start}
+.wf-card-emoji{font-size:20px;flex-shrink:0}
+.wf-card-title{font-size:14px;font-weight:700;color:#f0f6ff;margin-bottom:3px}
+.wf-card-path{font-size:10px;color:#6e7681;font-family:'SF Mono',Consolas,monospace;margin-bottom:4px}
+.wf-card-desc{font-size:11px;color:#8b949e;line-height:1.5}
+.wf-toggle{color:#6e7681;font-size:14px;transition:transform .2s;flex-shrink:0;padding-top:4px}
+.wf-toggle.open{transform:rotate(180deg);color:#58a6ff}
+.wf-body{display:none;border-top:1px solid #21262d}
+.wf-body.open{display:block}
+
+/* ── Tables ── */
+.tbl-wrap{overflow-x:auto;margin:12px 0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#161b22;color:#c9d1d9;font-weight:600;padding:8px 12px;text-align:left;border-bottom:2px solid #30363d;white-space:nowrap}
+td{padding:7px 12px;border-bottom:1px solid #21262d;vertical-align:top;color:#8b949e;line-height:1.5}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+td code{font-size:11px}
+td.key{color:#79c0ff;font-family:'SF Mono',Consolas,monospace;white-space:nowrap}
+td.protect{color:#ff7b72}
+td.yes{color:#56d364;font-weight:600}
+td.no{color:#6e7681}
+td.default{color:#e3b341}
+td.required{color:#ff7b72;font-weight:600}
+
+/* ── Step list ── */
+.steps{list-style:none;padding:0 16px 12px}
+.steps li{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.steps li:last-child{border-bottom:none}
+.step-num{font-size:9px;font-weight:700;color:#58a6ff;background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.2);border-radius:3px;padding:1px 5px;flex-shrink:0;font-family:'SF Mono',Consolas,monospace;height:18px;line-height:16px;min-width:26px;text-align:center;margin-top:1px}
+.step-num.loop{color:#c084fc;background:rgba(130,80,255,.12);border-color:rgba(130,80,255,.2)}
+.step-body{flex:1}
+.step-name{font-size:11px;font-weight:500;color:#c9d1d9;margin-bottom:3px}
+.step-desc{font-size:10px;color:#6e7681;line-height:1.5}
+.step-tag{font-size:9px;padding:1px 5px;border-radius:8px;margin-left:5px;font-weight:600;display:inline-block}
 .tag-mock{background:rgba(187,128,9,.15);color:#e3b341;border:1px solid rgba(187,128,9,.25)}
-.tag-skip{background:rgba(56,139,253,.12);color:#79c0ff;border:1px solid rgba(56,139,253,.25)}
 .tag-snow{background:rgba(130,80,255,.15);color:#c084fc;border:1px solid rgba(130,80,255,.25)}
-.tag-always{background:rgba(46,160,67,.12);color:#56d364;border:1px solid rgba(46,160,67,.25)}
 .tag-prod{background:rgba(248,81,73,.12);color:#ff7b72;border:1px solid rgba(248,81,73,.25)}
+.tag-skip{background:rgba(56,139,253,.12);color:#79c0ff;border:1px solid rgba(56,139,253,.25)}
 
-/* ── Sub-loops ── */
-.loop-box{margin:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px 10px}
-.loop-title{font-size:10px;font-weight:600;color:#79c0ff;margin-bottom:6px;display:flex;align-items:center;gap:6px}
-.loop-title::before{content:'↻';font-size:12px}
-.loop-step{display:flex;align-items:flex-start;gap:7px;padding:3px 0}
-.loop-step-num{font-size:9px;font-weight:700;color:#c084fc;background:rgba(130,80,255,.12);border:1px solid rgba(130,80,255,.25);border-radius:3px;padding:1px 4px;flex-shrink:0;margin-top:1px;font-family:'SF Mono',Consolas,monospace;min-width:22px;text-align:center}
-.loop-step-content{flex:1}
-.loop-step-name{font-size:11px;font-weight:500;color:#c9d1d9;cursor:pointer;display:flex;align-items:center;gap:5px}
-.loop-step-name:hover{color:#c084fc}
-.loop-step-details{display:none;margin-top:4px;padding-left:2px;border-left:2px solid #21262d}
-.loop-step-details.open{display:block}
+/* ── Sub-section ── */
+.sub-section{padding:14px 16px;border-bottom:1px solid #21262d}
+.sub-section:last-child{border-bottom:none}
+.sub-title{font-size:11px;font-weight:700;color:#c9d1d9;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.sub-title::before{content:'';display:inline-block;width:8px;height:2px;background:currentColor;border-radius:1px}
 
-/* ── Shared actions panel ── */
-.shared-section{margin-bottom:44px}
-.shared-title{font-size:14px;font-weight:700;color:#f0f6ff;margin-bottom:14px;display:flex;align-items:center;gap:8px;border-bottom:2px solid #21262d;padding-bottom:8px}
-.shared-grid{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
-.shared-card{background:#161b22;border:1px solid #30363d;border-radius:8px;flex:1;min-width:340px;max-width:600px;overflow:hidden}
-.shared-card-header{padding:10px 14px;background:#0d1117;border-bottom:1px solid #21262d;cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none}
-.shared-card-header:hover .shared-toggle{color:#58a6ff}
-.shared-card-title{font-size:13px;font-weight:600;color:#f0f6ff;display:flex;align-items:center;gap:8px}
-.shared-card-path{font-size:10px;color:#6e7681;font-family:'SF Mono',Consolas,monospace;margin-top:2px}
-.shared-toggle{color:#6e7681;font-size:12px;transition:transform .2s}
-.shared-toggle.open{transform:rotate(180deg)}
-.shared-body{display:none}
-.shared-body.open{display:block}
+/* ── Variable precedence stack ── */
+.prec-stack{display:flex;flex-direction:column;gap:2px;margin:20px 0;max-width:640px}
+.prec-layer{display:flex;align-items:stretch;gap:0}
+.prec-bar{flex:1;padding:10px 16px;border-radius:6px;display:flex;align-items:center;gap:10px}
+.prec-num{font-size:10px;font-weight:700;background:rgba(255,255,255,.15);border-radius:3px;padding:1px 7px;flex-shrink:0;color:inherit}
+.prec-name{font-size:12px;font-weight:600}
+.prec-desc{font-size:10px;opacity:.8;margin-top:2px}
+.prec-arrow-col{display:flex;flex-direction:column;align-items:center;justify-content:center;width:28px;font-size:11px;color:#444d58}
+.prec-wins{font-size:9px;font-weight:700;background:rgba(255,255,255,.12);border-radius:10px;padding:1px 7px;margin-left:auto;white-space:nowrap;flex-shrink:0}
+.prec-l5{background:linear-gradient(90deg,#1a2d1a,#1c3322);border:1px solid #2d4a2d;color:#56d364}
+.prec-l4{background:linear-gradient(90deg,#21231a,#282d1e);border:1px solid #363e25;color:#e3b341}
+.prec-l3{background:linear-gradient(90deg,#1a2232,#1e2a3a);border:1px solid #263247;color:#58a6ff}
+.prec-l2{background:linear-gradient(90deg,#1a261a,#1f2f1f);border:1px solid #263d26;color:#3fb950}
+.prec-l1{background:linear-gradient(90deg,#12191f,#182030);border:1px solid #1e2d3e;color:#79c0ff}
 
-/* ── Colour bands ── */
-.band-setup .job-header{border-left:3px solid #58a6ff}
-.band-export .job-header{border-left:3px solid #e3b341}
-.band-build .job-header{border-left:3px solid #79c0ff}
-.band-deploy-dev .job-header{border-left:3px solid #56d364}
-.band-deploy-managed .job-header{border-left:3px solid #3fb950}
-.band-deploy-uat .job-header{border-left:3px solid #ff9f0a}
-.band-deploy-prod .job-header{border-left:3px solid #ff7b72}
-.band-pr .job-header{border-left:3px solid #c084fc}
-.band-summary .job-header{border-left:3px solid #6e7681}
-.band-guard .job-header{border-left:3px solid #ff7b72}
-
-/* ── Legend ── */
-.legend{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px;padding:10px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;font-size:11px}
-.leg-item{display:flex;align-items:center;gap:5px;color:#8b949e}
-.leg-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
-
-/* ── Expand-all ── */
-.ctrl-bar{display:flex;gap:8px;margin-bottom:16px;align-items:center}
-.ctrl-btn{font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #30363d;background:#161b22;color:#8b949e;cursor:pointer;transition:all .15s}
-.ctrl-btn:hover{background:#21262d;color:#c9d1d9;border-color:#6e7681}
-.ctrl-btn.active{background:rgba(56,139,253,.12);color:#58a6ff;border-color:rgba(56,139,253,.4)}
+/* ── Env grid ── */
+.env-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px;margin:14px 0}
+.env-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px}
+.env-card .env-name{font-size:13px;font-weight:700;color:#f0f6ff;margin-bottom:5px;text-align:center}
+.env-type{font-size:10px;padding:2px 8px;border-radius:10px;display:inline-block;margin-bottom:7px;width:100%;text-align:center}
+.env-managed{background:rgba(46,160,67,.12);color:#56d364;border:1px solid rgba(46,160,67,.25)}
+.env-unmanaged{background:rgba(56,139,253,.12);color:#79c0ff;border:1px solid rgba(56,139,253,.25)}
+.env-detail{font-size:10px;color:#6e7681;line-height:1.5}
 
 /* ── Footer ── */
 .footer{text-align:center;padding:20px;color:#6e7681;font-size:11px;border-top:1px solid #21262d}
-
-/* ── Responsive ── */
-@media(max-width:700px){.job-card,.job-card.wide,.job-card.narrow{width:100%}.parallel-group{flex-direction:column}.flow-row{flex-direction:column}}
+@media(max-width:700px){.sidebar{display:none}.pipe-flow{flex-direction:column}}
 </style>
 </head>
 <body>
 
-<div class="hdr">
-  <div class="hdr-left">
-    <div class="hdr-icon">⚡</div>
-    <div>
-      <div class="hdr-title">GHA Power Platform CI/CD — End-to-End Pipeline Flow</div>
-      <div class="hdr-sub">GHA-Core (reusable library) + GHA-Dynamics (caller) · Every job · Every step · Every sub-step</div>
-    </div>
+<!-- ═══════════ SIDEBAR ═══════════ -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-title">⚡ GHA CI/CD</div>
+    <div class="logo-sub">Power Platform · End-to-End Guide</div>
   </div>
-  <div class="badges">
-    <span class="badge b-blue">2 Pipelines</span>
-    <span class="badge b-green">12 Jobs</span>
-    <span class="badge b-amber">6 Environments</span>
-    <span class="badge b-purple">ServiceNow CR lifecycle</span>
-    <span class="badge b-red">Inline Rollback</span>
+  <div class="nav-group">
+    <div class="nav-group-label">Overview</div>
+    <div class="nav-item active" onclick="goTo('overview',this)">🗺️ Architecture</div>
+    <div class="nav-item" onclick="goTo('environments',this)">🌍 Environments</div>
+  </div>
+  <div class="nav-group">
+    <div class="nav-group-label">Caller Workflows</div>
+    <div class="nav-item" onclick="goTo('pipeline1',this)">🚀 Pipeline 1 — Build &amp; Deploy</div>
+    <div class="nav-item" onclick="goTo('pipeline2',this)">🏁 Pipeline 2 — UAT + Prod</div>
+    <div class="nav-item" onclick="goTo('export-wf',this)">📤 Export Solution</div>
+  </div>
+  <div class="nav-group">
+    <div class="nav-group-label">GHA-Core Reusables</div>
+    <div class="nav-item" onclick="goTo('stage-export',this)">📦 _stage-export</div>
+    <div class="nav-item" onclick="goTo('stage-build',this)">🏗️ _stage-build</div>
+    <div class="nav-item" onclick="goTo('lint-wf',this)">🔍 _reusable-lint</div>
+    <div class="nav-item" onclick="goTo('rollback-wf',this)">⏪ rollback</div>
+    <div class="nav-item" onclick="goTo('test-wf',this)">🧪 pipeline-test</div>
+    <div class="nav-item" onclick="goTo('actions-ref',this)">🔧 Composite Actions</div>
+  </div>
+  <div class="nav-group">
+    <div class="nav-group-label">Variables &amp; Secrets</div>
+    <div class="nav-item" onclick="goTo('var-precedence',this)">📊 Precedence Table</div>
+    <div class="nav-item" onclick="goTo('global-vars',this)">🌐 Global Vars (GHA-Core)</div>
+    <div class="nav-item" onclick="goTo('project-vars',this)">📁 Project Vars (GHA-Dynamics)</div>
+    <div class="nav-item" onclick="goTo('github-vars',this)">🐙 GitHub Variables &amp; Secrets</div>
+    <div class="nav-item" onclick="goTo('akv-secrets',this)">🔐 Azure Key Vault Secrets</div>
+  </div>
+</nav>
+
+<!-- ═══════════ MAIN ═══════════ -->
+<main class="main" id="mainScroll">
+<div class="content">
+
+<!-- HERO -->
+<div class="hero">
+  <h1>⚡ Power Platform CI/CD — End-to-End Guide</h1>
+  <p>This page explains the entire automated pipeline that takes a Power Platform solution from a developer's sandbox all the way to Production. Each section explains the <em>why</em> before the technical details — no prior DevOps knowledge required.</p>
+  <div class="badge-row">
+    <span class="badge b-blue">Two-Pipeline Architecture</span>
+    <span class="badge b-green">Zero Static Secrets (OIDC + AKV)</span>
+    <span class="badge b-amber">7 Environments</span>
+    <span class="badge b-purple">ServiceNow CR Integration</span>
+    <span class="badge b-red">JFrog Artifactory</span>
   </div>
 </div>
 
-<div class="page">
+<!-- ════════════════════════════════════════════ -->
+<!-- ARCHITECTURE                                 -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="overview">
+  <div class="section-title">🗺️ Architecture Overview</div>
+  <div class="section-sub">The system uses <strong>two repositories</strong> and a <strong>two-pipeline design</strong>. GHA-Core is a shared toolbox containing all reusable build and deploy logic. GHA-Dynamics is the project-specific caller that provides configuration — which solutions to deploy, which URLs to use.</div>
 
-  <!-- Controls -->
-  <div class="ctrl-bar">
-    <button class="ctrl-btn" onclick="expandAll()">▼ Expand All</button>
-    <button class="ctrl-btn" onclick="collapseAll()">▲ Collapse All</button>
-    <span style="color:#6e7681;font-size:11px">Click any job card or step to expand details</span>
+  <div class="callout">
+    <strong>Two-Repo Design:</strong> All build/deploy scripts and reusable workflows live in <strong>GHA-Core</strong> (shared, org-wide). Only project config (solutions.json, deployment-settings, project-vars.yml) lives in <strong>GHA-Dynamics</strong>. This keeps the toolbox clean and shareable across multiple projects without code duplication.
   </div>
 
-  <!-- Legend -->
-  <div class="legend">
-    <div class="leg-item"><div class="leg-dot" style="background:#58a6ff"></div>Setup</div>
-    <div class="leg-item"><div class="leg-dot" style="background:#e3b341"></div>Export</div>
-    <div class="leg-item"><div class="leg-dot" style="background:#79c0ff"></div>Build</div>
-    <div class="leg-item"><div class="leg-dot" style="background:#56d364"></div>Deploy Dev (unmanaged)</div>
-    <div class="leg-item"><div class="leg-dot" style="background:#3fb950"></div>Deploy Managed (Intg/FRS/Perf)</div>
-    <div class="leg-item"><div class="leg-dot" style="background:#ff9f0a"></div>Deploy UAT (gate)</div>
-    <div class="leg-item"><div class="leg-dot" style="background:#ff7b72"></div>Deploy Prod</div>
-    <div class="leg-item"><div class="leg-dot" style="background:#c084fc"></div>PR / Guard</div>
-    <div class="leg-item"><div class="leg-dot" style="background:#6e7681"></div>Summary</div>
+  <div class="flow-diagram">
+    <pre>
+  ┌──────────────────────────────────────────────────────────────────────────────┐
+  │  TWO-PIPELINE ARCHITECTURE                                                   │
+  │                                                                              │
+  │  PIPELINE 1  —  build-and-deploy.yml  (GHA-Dynamics)                        │
+  │  Trigger: Manual dispatch  OR  push to feature/* branch                      │
+  │                                                                              │
+  │  <span class="hi-amber">Setup</span> → <span class="hi-amber">Lint Config</span> → <span class="hi-amber">Stage Export</span> → <span class="hi-cyan">Stage Build</span>                        │
+  │                                         ↓                                   │
+  │                          <span class="hi-green">Dev</span>  <span class="hi-green">Intg</span>  <span class="hi-amber">UAT</span>  <span class="hi-blue">FRS</span>  <span class="hi-blue">Perf</span>   (5 parallel jobs)   │
+  │                                         ↓  (after UAT passes)               │
+  │                          <span class="hi-purple">Open PR: feature/pipeline-N → main</span>            │
+  │                                                                              │
+  │  ──── PR REVIEWED &amp; MERGED TO MAIN ─────────────────────────────────────    │
+  │                                                                              │
+  │  PIPELINE 2  —  deploy-prod.yml  (GHA-Dynamics)                             │
+  │  Auto-trigger: pipeline-context.json pushed to main at PR merge              │
+  │                                                                              │
+  │  <span class="hi-red">Guard</span> → <span class="hi-red">Read Context</span> → <span class="hi-amber">UAT re-validate</span> → <span class="hi-red">🚦 Prod Approval Gate</span>        │
+  │                                                   ↓                         │
+  │                                            <span class="hi-red">Prod Deploy</span>                      │
+  └──────────────────────────────────────────────────────────────────────────────┘
+    </pre>
   </div>
 
-  <!-- ═══════════════════════════════════ PIPELINE 1 ═══════════════════════════════════ -->
-  <div class="pipeline-section">
-    <div class="pipeline-title">
-      <span>⚙️</span>
-      <span>Pipeline 1 — build-and-deploy.yml</span>
-      <span class="pt-file">.github/workflows/build-and-deploy.yml</span>
-      <span class="pt-trigger">push: feature/** · workflow_dispatch</span>
+  <div class="callout warn">
+    <strong>Why two pipelines?</strong> Production needs a mandatory human gate. Pipeline 1 does all the work (build + test environments). Pipeline 2 fires only when someone reviews and merges the PR — providing an explicit human checkpoint before Production. The two are linked by <code>pipeline-context.json</code>, a handshake file that carries the Pipeline 1 build artifacts reference to Pipeline 2.
+  </div>
+
+  <div class="callout">
+    <strong>Zero Static Secrets:</strong> No Power Platform passwords or API keys are stored in GitHub Secrets. Instead, the pipeline logs into Azure using OIDC (a short-lived token generated per job), then retrieves credentials from Azure Key Vault at runtime. Credentials rotate independently and are never visible in logs.
+  </div>
+
+  <div class="flow-diagram" style="margin-top:20px">
+    <pre>
+  <span class="hi-amber">Developer customises</span>           <span class="hi-cyan">Automated pipeline</span>                  <span class="hi-red">Human gates</span>
+  in Power Platform sandbox
+        │
+        ▼
+  <span class="hi-amber">Export Solution workflow</span>  ──►  Commits unpacked source to feature branch
+        │
+        ▼
+  <span class="hi-cyan">Pipeline 1 fires</span>          ──►  Pack ZIPs → Solution Checker (always on)
+                                ──►  Deploy Dev    (Unmanaged, fast feedback)
+                                ──►  Deploy Intg   (Managed)           ◄── <span class="hi-red">Optional gate</span>
+                                ──►  Deploy UAT    (Managed, version compare) ◄── <span class="hi-red">Optional gate</span>
+                                ──►  Deploy FRS    (Managed, parallel) ◄── <span class="hi-red">Optional gate</span>
+                                ──►  Deploy Perf   (Managed, parallel) ◄── <span class="hi-red">Optional gate</span>
+                                ──►  Open PR → main  (after UAT passes)
+        │
+        ▼
+  <span class="hi-red">PR reviewed &amp; merged</span>      ──►  <span class="hi-red">Pipeline 2 auto-fires</span>
+                                ──►  Re-deploy UAT (re-validation)
+                                ──►  <span class="hi-red">🚦 Prod approval required</span>
+                                ──►  Deploy Prod   (Managed + config data + JFrog tag)
+    </pre>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════ -->
+<!-- ENVIRONMENTS                                 -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="environments">
+  <div class="section-title">🌍 Environments</div>
+  <div class="section-sub">7 Power Platform environments. Each has its own URL, Azure Key Vault credentials, and GitHub approval gate. Changes flow left → right, with increasing rigour at each step.</div>
+
+  <div class="env-grid">
+    <div class="env-card"><div class="env-name">🧪 Sandbox</div><div class="env-type env-unmanaged">Unmanaged</div><div class="env-detail">Developer playground. Export solutions from here to start a release. Var: <code>PP_SDBX_URL</code></div></div>
+    <div class="env-card"><div class="env-name">🟢 Dev</div><div class="env-type env-unmanaged">Unmanaged</div><div class="env-detail">First automated deploy. No approval gate by default. Developers can iterate quickly. Var: <code>PP_DEV_URL</code></div></div>
+    <div class="env-card"><div class="env-name">🔵 Intg</div><div class="env-type env-managed">Managed</div><div class="env-detail">Integration testing. Managed. Blocking check enabled. Var: <code>PP_INTG_URL</code></div></div>
+    <div class="env-card"><div class="env-name">🟡 UAT</div><div class="env-type env-managed">Managed</div><div class="env-detail">User acceptance testing. Version compare on. UAT passing creates the PR to main. Var: <code>PP_UAT_URL</code></div></div>
+    <div class="env-card"><div class="env-name">🔷 FRS</div><div class="env-type env-managed">Managed</div><div class="env-detail">Full regression. Runs in parallel — does not block PR creation. Var: <code>PP_FRS_URL</code></div></div>
+    <div class="env-card"><div class="env-name">⚡ Perf</div><div class="env-type env-managed">Managed</div><div class="env-detail">Performance testing. Runs in parallel — does not block PR creation. Var: <code>PP_PERF_URL</code></div></div>
+    <div class="env-card"><div class="env-name">🔴 Prod</div><div class="env-type env-managed">Managed</div><div class="env-detail">Production. Human approval required. Config data imported. JFrog artifact tagged. Var: <code>PP_PROD_URL</code></div></div>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Environment</th><th>Pipeline</th><th>Solution Type</th><th>Blocking Check</th><th>Version Compare</th><th>Config Data Import</th><th>Approval Gate</th><th>ServiceNow CR</th></tr></thead>
+      <tbody>
+        <tr><td>Dev</td><td>P1</td><td>Unmanaged</td><td class="no">Off</td><td class="no">Off</td><td class="no">No</td><td class="no">Optional</td><td class="no">Optional</td></tr>
+        <tr><td>Intg</td><td>P1</td><td class="yes">Managed</td><td class="yes">On</td><td class="no">Off</td><td class="no">No</td><td>Configurable</td><td class="no">Optional</td></tr>
+        <tr><td>UAT (P1)</td><td>P1</td><td class="yes">Managed</td><td class="yes">On</td><td class="yes">On</td><td class="no">No</td><td>Configurable</td><td class="no">Optional</td></tr>
+        <tr><td>FRS</td><td>P1</td><td class="yes">Managed</td><td class="yes">On</td><td class="yes">On</td><td class="no">No</td><td>Configurable</td><td class="no">Optional</td></tr>
+        <tr><td>Perf</td><td>P1</td><td class="yes">Managed</td><td class="yes">On</td><td class="yes">On</td><td class="no">No</td><td>Configurable</td><td class="no">Optional</td></tr>
+        <tr><td>UAT (P2 re-validate)</td><td>P2</td><td class="yes">Managed</td><td class="yes">On</td><td class="yes">On</td><td class="no">No</td><td>Configurable</td><td class="no">Optional</td></tr>
+        <tr><td><strong>Prod</strong></td><td>P2</td><td class="yes">Managed</td><td class="yes">On</td><td class="yes">On</td><td class="yes">Yes</td><td class="required">Required</td><td class="yes">Mandatory</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- PIPELINE 1                                   -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="pipeline1">
+  <div class="section-title">🚀 Pipeline 1 — Build &amp; Deploy</div>
+  <div class="section-sub">
+    <strong>File:</strong> <code>GHA-Dynamics/.github/workflows/build-and-deploy.yml</code><br>
+    The main workhorse. Exports solutions from sandbox, packs ZIPs, runs Solution Checker, deploys to all pre-production environments, then opens a PR to queue Production.
+  </div>
+
+  <div class="callout">
+    <strong>Triggers:</strong><br>
+    • <strong>Manual (workflow_dispatch)</strong> — click "Run workflow" in GitHub Actions UI<br>
+    • <strong>Automatic (push)</strong> — pushing commits to any <code>feature/**</code> branch fires this automatically, with <code>skip_export</code> set to true (source is already committed)
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">⚙️</div><div><div class="wf-card-title">Workflow Inputs (workflow_dispatch)</div><div class="wf-card-desc">Parameters you can set when triggering manually</div></div></div>
+      <div class="wf-toggle">▼</div>
     </div>
-
-    <!-- Row 1: Setup -->
-    <div class="flow-row" style="margin-bottom:12px">
-      <div class="job-card band-setup" id="card-setup">
-        <div class="job-header" onclick="toggleCard('setup')">
-          <span class="job-emoji">🔍</span>
-          <div class="job-info">
-            <div class="job-name">Setup</div>
-            <div class="job-meta">
-              <span>ubuntu-latest</span>
-              <span>Runs on: push / dispatch</span>
-            </div>
-          </div>
-          <span class="job-toggle" id="toggle-setup">▼</span>
-        </div>
-        <div class="job-body" id="body-setup">
-          <div class="job-purpose">Resolve solution matrix, check secret presence, emit outputs for all downstream jobs.</div>
-          <div class="steps-list">
-            <div class="step-item">
-              <span class="step-num">1</span>
-              <div class="step-content">
-                <div class="step-name" onclick="toggleStep('s-setup-1')">Checkout GHA-Dynamics <span class="step-expand-icon" id="si-s-setup-1">▶</span></div>
-                <div class="step-details" id="sd-s-setup-1">
-                  <div class="step-detail-item"><code>actions/checkout@v4</code> with <code>fetch-depth: 0</code> (full history). Checks out the calling repo (GHA-Dynamics) — <code>solutions.json</code>, <code>deployment-settings/</code>, source tree.</div>
-                </div>
-              </div>
-            </div>
-            <div class="step-item">
-              <span class="step-num">2</span>
-              <div class="step-content">
-                <div class="step-name" onclick="toggleStep('s-setup-2')">Checkout GHA-Core CI scripts <span class="step-expand-icon" id="si-s-setup-2">▶</span></div>
-                <div class="step-details" id="sd-s-setup-2">
-                  <div class="step-detail-item"><code>actions/checkout@v4</code> targeting <code>ppudot2-cloud/GHA-Core@main</code>, auth via <code>secrets.GHA_CORE_PAT</code>, path <code>.ci/</code>. Provides all PowerShell scripts, composite actions, <code>global-vars.yml</code>, and the ServiceNow PS module.</div>
-                </div>
-              </div>
-            </div>
-            <div class="step-item">
-              <span class="step-num">3</span>
-              <div class="step-content">
-                <div class="step-name" onclick="toggleStep('s-setup-3')">Resolve solution matrix <span class="step-expand-icon" id="si-s-setup-3">▶</span></div>
-                <div class="step-details" id="sd-s-setup-3">
-                  <div class="step-detail-item">Calls <code>Resolve-SolutionMatrix.ps1</code> with <code>-InputSolutions</code> (from <code>inputs.solutions || 'all'</code>), <code>-PpSolutionName</code> (from <code>vars.PP_SOLUTION_NAME</code>), <code>-SolutionsJsonPath solutions.json</code>.</div>
-                  <div class="step-detail-item">Reads <code>solutions.json</code>, validates names, sorts by <code>deployOrder</code>, builds GitHub Actions matrix JSON.</div>
-                  <div class="step-detail-item">Outputs to <code>$GITHUB_OUTPUT</code>: <code>matrix</code> (JSON), <code>solution_list</code> (comma-separated), <code>solution_count</code> (integer).</div>
-                </div>
-              </div>
-            </div>
-            <div class="step-item">
-              <span class="step-num">4</span>
-              <div class="step-content">
-                <div class="step-name" onclick="toggleStep('s-setup-4')">Check credential presence <span class="step-expand-icon" id="si-s-setup-4">▶</span></div>
-                <div class="step-details" id="sd-s-setup-4">
-                  <div class="step-detail-item">Evaluates <code>secrets.*</code> in a <code>run:</code> step — the only place GitHub permits reading secrets into outputs.</div>
-                  <div class="step-detail-item">Checks <code>PP_APP_ID</code>, <code>PP_CLIENT_SECRET</code>, <code>PP_TENANT_ID</code>, <code>GHA_CORE_PAT</code> — writes <code>true</code>/<code>false</code> flags to <code>$GITHUB_OUTPUT</code>.</div>
-                  <div class="step-detail-item"><em>These flags are consumed by the Validate Pipeline Config job to fail-fast if a secret is missing.</em></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Row 2: Export stage -->
-    <div class="flow-row" style="margin-bottom:12px">
-      <div class="flow-connector"><div class="flow-arrow">↓</div></div>
-      <div class="parallel-group">
-        <div class="job-card band-export" id="card-export">
-          <div class="job-header" onclick="toggleCard('export')">
-            <span class="job-emoji">📤</span>
-            <div class="job-info">
-              <div class="job-name">Export <span class="step-tag tag-skip">matrix · parallel</span></div>
-              <div class="job-meta"><span>GHA-Core/_stage-export.yml</span><span>if: !skip_export</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-export">▼</span>
-          </div>
-          <div class="job-body" id="body-export">
-            <div class="job-condition">if: !inputs.skip_export</div>
-            <div class="job-purpose">Export unmanaged solution from Power Platform sandbox, unpack, upload as GitHub artifact.</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1</span><div class="step-content"><div class="step-name" onclick="toggleStep('ex-1')">Reveille <span class="step-expand-icon" id="si-ex-1">▶</span></div><div class="step-details" id="sd-ex-1"><div class="step-detail-item"><em>See Shared Action Reference: Reveille (6 steps).</em> <code>jfrog_enabled=false</code>, <code>servicenow_enabled=false</code>.</div></div></div></div>
-              <div class="step-item"><span class="step-num">2</span><div class="step-content"><div class="step-name" onclick="toggleStep('ex-2')">Install PAC CLI <span class="step-expand-icon" id="si-ex-2">▶</span></div><div class="step-details" id="sd-ex-2"><div class="step-detail-item"><code>microsoft/powerplatform-actions/actions-install@v1</code> — adds <code>pac</code> CLI to <code>$PATH</code>.</div></div></div></div>
-              <div class="step-item"><span class="step-num">3</span><div class="step-content"><div class="step-name" onclick="toggleStep('ex-3')">Export Solution <span class="step-expand-icon" id="si-ex-3">▶</span></div><div class="step-details" id="sd-ex-3"><div class="step-detail-item"><strong>Real:</strong> <code>pac solution export --name &lt;name&gt; --path export-src/&lt;name&gt;.zip --environment &lt;PP_SDBX_URL&gt;</code></div><div class="step-detail-item"><code>pac solution unpack --zipfile export-src/&lt;name&gt;.zip --folder export-src/&lt;name&gt;/ --packageType Unmanaged</code> — unpacks into versioned source tree.</div><div class="step-detail-item"><strong>Mock:</strong> logs export simulation; produces stub source tree.</div></div></div></div>
-              <div class="step-item"><span class="step-num">4</span><div class="step-content"><div class="step-name" onclick="toggleStep('ex-4')">Upload exported source <span class="step-expand-icon" id="si-ex-4">▶</span></div><div class="step-details" id="sd-ex-4"><div class="step-detail-item"><code>actions/upload-artifact@v4</code> · artifact name: <code>exported-source-&lt;solution_name&gt;</code> · path: <code>export-src/&lt;name&gt;/</code> · retention 1 day.</div><div class="step-detail-item">Consumed by Build step 3 when <code>use_exported_source=true</code>.</div></div></div></div>
-            </div>
-          </div>
-        </div>
-        <div class="flow-connector" style="padding-top:22px"><div class="flow-arrow" style="color:#30363d">→</div></div>
-        <div class="job-card band-export wide" id="card-commit">
-          <div class="job-header" onclick="toggleCard('commit')">
-            <span class="job-emoji">📤</span>
-            <div class="job-info">
-              <div class="job-name">Commit pipeline context <span class="step-tag tag-always">always()</span></div>
-              <div class="job-meta"><span>GHA-Core/_stage-export.yml · jobs.commit</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-commit">▼</span>
-          </div>
-          <div class="job-body" id="body-commit">
-            <div class="job-condition">if: always() &amp;&amp; (export==success || export==skipped)</div>
-            <div class="job-purpose">Create/update feature branch, copy exported sources, write pipeline-context.json for Pipeline 2 handoff.</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1</span><div class="step-content"><div class="step-name" onclick="toggleStep('cm-1')">Checkout full history <span class="step-expand-icon" id="si-cm-1">▶</span></div><div class="step-details" id="sd-cm-1"><div class="step-detail-item"><code>actions/checkout@v4</code> with <code>fetch-depth: 0</code> and <code>token: secrets.GITHUB_TOKEN</code>. Full history needed to branch from <code>origin/main</code>.</div></div></div></div>
-              <div class="step-item"><span class="step-num">2</span><div class="step-content"><div class="step-name" onclick="toggleStep('cm-2')">Download exported source artifacts <span class="step-expand-icon" id="si-cm-2">▶</span></div><div class="step-details" id="sd-cm-2"><div class="step-detail-item"><em>Condition: if skip_export != true.</em> <code>actions/download-artifact@v4</code> with <code>pattern: exported-source-*</code> into <code>_export-src/</code>.</div></div></div></div>
-              <div class="step-item"><span class="step-num">3</span><div class="step-content"><div class="step-name" onclick="toggleStep('cm-3')">Commit source + write pipeline-context.json + push <span class="step-expand-icon" id="si-cm-3">▶</span></div><div class="step-details" id="sd-cm-3">
-                <div class="step-detail-item"><strong>Normal mode:</strong> creates <code>feature/pipeline-{run_number}</code> from <code>origin/main</code>; copies exported sources to <code>src/solutions/&lt;name&gt;/</code>; writes <code>.pipeline-export.json</code> markers; writes <code>pipeline-context.json</code>; commits with <code>[skip ci]</code>; pushes new branch.</div>
-                <div class="step-detail-item"><strong>Skip-export mode:</strong> writes <code>pipeline-context.json</code> to existing branch; force-pushes with <code>--force-with-lease</code>.</div>
-                <div class="step-detail-item"><code>pipeline-context.json</code> fields: <code>runId</code>, <code>runNumber</code>, <code>runAttempt</code>, <code>solutions[]</code>, <code>solutionList</code>, <code>matrix</code>, <code>featureBranch</code>, <code>triggeredBy</code>, <code>triggeredAt</code>, <code>exportMode</code>, <code>mockDeploy</code>.</div>
-              </div></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Row 3: Build stage -->
-    <div class="flow-row" style="margin-bottom:12px">
-      <div class="flow-connector"><div class="flow-arrow">↓</div></div>
-      <div class="parallel-group">
-        <div class="job-card band-build wide" id="card-build">
-          <div class="job-header" onclick="toggleCard('build')">
-            <span class="job-emoji">🏗️</span>
-            <div class="job-info">
-              <div class="job-name">Build — per solution <span class="step-tag tag-skip">matrix · parallel</span></div>
-              <div class="job-meta"><span>GHA-Core/_stage-build.yml → _job-build.yml</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-build">▼</span>
-          </div>
-          <div class="job-body" id="body-build">
-            <div class="job-purpose">Version-stamp, pack (unmanaged + managed), Solution Checker, config-data export, upload to GitHub artifact, archive to JFrog.</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1</span><div class="step-content"><div class="step-name" onclick="toggleStep('b-1')">Reveille <span class="step-expand-icon" id="si-b-1">▶</span></div><div class="step-details" id="sd-b-1"><div class="step-detail-item"><em>See Shared Action Reference: Reveille.</em> <code>jfrog_enabled=true</code> if <code>JFROG_URL</code> is set.</div></div></div></div>
-              <div class="step-item"><span class="step-num">2</span><div class="step-content"><div class="step-name">Install PAC CLI</div></div></div>
-              <div class="step-item"><span class="step-num">3</span><div class="step-content"><div class="step-name" onclick="toggleStep('b-3')">Download exported source artifact <span class="step-tag tag-skip">if use_exported_source</span> <span class="step-expand-icon" id="si-b-3">▶</span></div><div class="step-details" id="sd-b-3"><div class="step-detail-item">Downloads <code>exported-source-&lt;solution_name&gt;</code> to <code>export-src/&lt;solution_name&gt;/</code>. Skipped when building from committed source.</div></div></div></div>
-              <div class="step-item"><span class="step-num">4</span><div class="step-content"><div class="step-name" onclick="toggleStep('b-4')">Resolve source folder <span class="step-expand-icon" id="si-b-4">▶</span></div><div class="step-details" id="sd-b-4"><div class="step-detail-item">If <code>use_exported_source=true</code>: <code>folder=export-src/&lt;name&gt;</code>. Otherwise: <code>folder=&lt;solution_source_folder&gt;</code> (e.g. <code>src/solutions/CoreSolution</code>). Outputs <code>folder</code> to <code>$GITHUB_OUTPUT</code>.</div></div></div></div>
-              <div class="step-item"><span class="step-num">5</span><div class="step-content"><div class="step-name" onclick="toggleStep('b-5')">Pack Solution (5 sub-steps) <span class="step-expand-icon" id="si-b-5">▶</span></div><div class="step-details" id="sd-b-5">
-                <div class="step-detail-item"><strong>5a — Read &amp; stamp version:</strong> reads <code>Other/Solution.xml</code>, extracts version, computes <code>Major.Minor.{run_number}.{run_attempt}</code>, writes back.</div>
-                <div class="step-detail-item"><strong>5b — Set artifact names:</strong> computes <code>out/&lt;name&gt;/</code>, <code>*_unmanaged.zip</code>, <code>*_managed.zip</code>, <code>artifact_name</code>, <code>checker_artifact_name</code>. Creates output directories.</div>
-                <div class="step-detail-item"><strong>5c — Strip Managed tag:</strong> <code>Remove-ManagedTag.ps1</code> removes <code>&lt;Managed&gt;0&lt;/Managed&gt;</code> from <code>Solution.xml</code>. Required because PAC CLI 1.40+ rejects <code>--packageType managed</code> when tag is present.</div>
-                <div class="step-detail-item"><strong>5d — Pack Unmanaged ZIP:</strong> Real: <code>pack-solution@v1 --solution-type Unmanaged</code>. Mock: <code>New-MockSolutionZip.ps1</code>.</div>
-                <div class="step-detail-item"><strong>5e — Pack Managed ZIP:</strong> Real: <code>pack-solution@v1 --solution-type Managed</code>. Mock: second <code>New-MockSolutionZip.ps1</code> call.</div>
-              </div></div></div>
-              <div class="step-item"><span class="step-num">6</span><div class="step-content"><div class="step-name" onclick="toggleStep('b-6')">Solution Checker (3 sub-steps) <span class="step-expand-icon" id="si-b-6">▶</span></div><div class="step-details" id="sd-b-6">
-                <div class="step-detail-item"><strong>6a — Real checker:</strong> <code>check-solution@v1</code> with PP credentials, geo=UnitedStates, <code>fail-on-analysis-error: true</code>, <code>error-level: HighIssue</code> (configurable). Uploads SARIF to GitHub artifact. <em>Fails build if issues ≥ error_level found.</em></div>
-                <div class="step-detail-item"><strong>6b — Copy SARIF:</strong> searches <code>$RUNNER_TEMP</code>, <code>$GITHUB_WORKSPACE</code>, <code>.</code> for <code>*.sarif</code> files; copies to <code>out/&lt;name&gt;/solution-checker/</code>. Writes placeholder if none found.</div>
-                <div class="step-detail-item"><strong>6c — Mock checker:</strong> <code>Invoke-SolutionCheckerSim.ps1</code> — validates ZIP structure, generates mock SARIF. No PP connection.</div>
-              </div></div></div>
-              <div class="step-item"><span class="step-num">7</span><div class="step-content"><div class="step-name" onclick="toggleStep('b-7')">Export Config Data <span class="step-tag tag-skip">if data_schema_file set</span> <span class="step-expand-icon" id="si-b-7">▶</span></div><div class="step-details" id="sd-b-7"><div class="step-detail-item">Real: <code>export-data@v1</code> using schema XML → <code>config-data/&lt;name&gt;-data.zip</code>. Mock: <code>Export-ConfigDataSim.ps1</code> validates schema XML, creates placeholder ZIP. Skipped entirely if <code>data_schema_file</code> is empty.</div></div></div></div>
-              <div class="step-item"><span class="step-num">8</span><div class="step-content"><div class="step-name" onclick="toggleStep('b-8')">Upload solution artifact <span class="step-expand-icon" id="si-b-8">▶</span></div><div class="step-details" id="sd-b-8"><div class="step-detail-item">Artifact name: <code>solution-artifact-&lt;solution_name&gt;</code>. Path: <code>out/&lt;name&gt;/</code> + <code>config-data/&lt;name&gt;-data.zip</code>. Retention: 7 days. <em>Consumed by all 5 deploy jobs + Pipeline 2 UAT/Prod.</em></div></div></div></div>
-              <div class="step-item"><span class="step-num">9</span><div class="step-content"><div class="step-name" onclick="toggleStep('b-9')">JFrog Upload <span class="step-tag tag-skip">if jfrog_url set</span> <span class="step-expand-icon" id="si-b-9">▶</span></div><div class="step-details" id="sd-b-9"><div class="step-detail-item"><code>Invoke-JFrogAction.ps1 upload</code> — uploads managed ZIP, unmanaged ZIP, SARIF to <code>{repo}/{name}/{version}/</code>. Sets artifact properties: <code>solution.name</code>, <code>run.number</code>, <code>build.timestamp</code>. Mock: logs simulation only.</div></div></div></div>
-              <div class="step-item"><span class="step-num">10</span><div class="step-content"><div class="step-name" onclick="toggleStep('b-10')">Write build summary <span class="step-tag tag-always">always()</span> <span class="step-expand-icon" id="si-b-10">▶</span></div><div class="step-details" id="sd-b-10"><div class="step-detail-item"><code>Write-BuildSummary.ps1</code> — writes markdown table to <code>$GITHUB_STEP_SUMMARY</code>: solution name, version, artifact, run number, mock flag, config-data status, JFrog status. Also writes JSON record for pipeline summary aggregation.</div></div></div></div>
-            </div>
-          </div>
-        </div>
-        <div class="flow-connector" style="padding-top:22px"><div class="flow-arrow" style="color:#30363d">→</div></div>
-        <div class="job-card band-build" id="card-validate">
-          <div class="job-header" onclick="toggleCard('validate')">
-            <span class="job-emoji">🏗️</span>
-            <div class="job-info">
-              <div class="job-name">Validate Pipeline Config</div>
-              <div class="job-meta"><span>if: all builds pass</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-validate">▼</span>
-          </div>
-          <div class="job-body" id="body-validate">
-            <div class="job-condition">if: needs.build.result == 'success'</div>
-            <div class="job-purpose">Print all toggles, env URLs, and secret status to step summary. Fail-fast if any required config is missing in non-mock mode.</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1</span><div class="step-content"><div class="step-name" onclick="toggleStep('v-1')">Print toggles &amp; validate config <span class="step-expand-icon" id="si-v-1">▶</span></div><div class="step-details" id="sd-v-1">
-                <div class="step-detail-item">Prints: <code>mock_deploy</code>, <code>enable_backup</code>, <code>checker_error_level</code>, <code>base_solutions</code>, solution count &amp; list.</div>
-                <div class="step-detail-item">Environment URLs (Sandbox, Dev, Intg, UAT, FRS, Perf, Prod) — ✅ set or ❌ NOT SET.</div>
-                <div class="step-detail-item">Service connections: <code>PP_APP_ID</code>, <code>PP_CLIENT_SECRET</code>, <code>PP_TENANT_ID</code>, <code>GHA_CORE_PAT</code> — uses pre-evaluated flags from Setup job.</div>
-                <div class="step-detail-item"><em>Fails the pipeline in non-mock mode if any required secret or environment URL is missing.</em></div>
-              </div></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Row 4: Deploy environments (5 parallel) -->
-    <div class="flow-row" style="margin-bottom:12px">
-      <div class="flow-connector"><div class="flow-arrow">↓</div></div>
-      <div class="parallel-group">
-
-        <!-- Dev -->
-        <div class="job-card band-deploy-dev narrow" id="card-dev">
-          <div class="job-header" onclick="toggleCard('dev')">
-            <span class="job-emoji">🚀</span>
-            <div class="job-info">
-              <div class="job-name">Deploy | Dev</div>
-              <div class="job-meta"><span>Unmanaged · No approval</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-dev">▼</span>
-          </div>
-          <div class="job-body" id="body-dev">
-            <div class="job-purpose">Deploy unmanaged solution to Dev (makers can continue editing). No approval gate by default.</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1</span><div class="step-content"><div class="step-name">Reveille</div><div class="step-ref">→ See Reveille reference</div></div></div>
-              <div class="step-item"><span class="step-num">2</span><div class="step-content"><div class="step-name">Install PAC CLI</div></div></div>
-              <div class="step-item"><span class="step-num">3</span><div class="step-content"><div class="step-name" onclick="toggleStep('dev-3')">Download solution artifacts <span class="step-expand-icon" id="si-dev-3">▶</span></div><div class="step-details" id="sd-dev-3"><div class="step-detail-item"><code>download-artifact@v4</code> with <code>pattern: solution-artifact-*</code>, <code>merge-multiple: true</code>. Restores all <code>out/&lt;name&gt;/</code> dirs and <code>config-data/</code> files.</div></div></div></div>
-              <div class="step-item"><span class="step-num">4</span><div class="step-content"><div class="step-name" onclick="toggleStep('dev-4')">Deploy all solutions → Dev <span class="step-expand-icon" id="si-dev-4">▶</span></div><div class="step-details" id="sd-dev-4">
-                <div class="step-detail-item"><code>solution_type: Unmanaged</code></div>
-                <div class="step-detail-item"><code>enable_blocking_check: false</code> — Dev is fast-cycle</div>
-                <div class="step-detail-item"><code>enable_version_compare: false</code> — always re-import</div>
-                <div class="step-detail-item"><code>import_config_data: false</code></div>
-                <div class="step-detail-item"><em>See Deploy All Solutions reference for 11-step loop detail.</em></div>
-              </div></div></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Intg -->
-        <div class="job-card band-deploy-managed narrow" id="card-intg">
-          <div class="job-header" onclick="toggleCard('intg')">
-            <span class="job-emoji">🚀</span>
-            <div class="job-info">
-              <div class="job-name">Deploy | Intg</div>
-              <div class="job-meta"><span>Managed · Optional gate</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-intg">▼</span>
-          </div>
-          <div class="job-body" id="body-intg">
-            <div class="job-purpose">Deploy managed solution to Integration. First managed environment after Dev.</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1-3</span><div class="step-content"><div class="step-name">Reveille → PAC → Download artifacts</div></div></div>
-              <div class="step-item"><span class="step-num">4</span><div class="step-content"><div class="step-name" onclick="toggleStep('intg-4')">Deploy all solutions → Intg <span class="step-expand-icon" id="si-intg-4">▶</span></div><div class="step-details" id="sd-intg-4">
-                <div class="step-detail-item"><code>solution_type: Managed</code></div>
-                <div class="step-detail-item"><code>enable_blocking_check: true</code></div>
-                <div class="step-detail-item"><code>enable_version_compare: false</code></div>
-                <div class="step-detail-item"><code>previous_environment_url: PP_DEV_URL</code></div>
-              </div></div></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- UAT -->
-        <div class="job-card band-deploy-uat narrow" id="card-uat">
-          <div class="job-header" onclick="toggleCard('uat')">
-            <span class="job-emoji">🚀</span>
-            <div class="job-info">
-              <div class="job-name">Deploy | UAT</div>
-              <div class="job-meta"><span>Managed · 🔐 Required Reviewers</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-uat">▼</span>
-          </div>
-          <div class="job-body" id="body-uat">
-            <div class="job-purpose">Deploy managed solution to UAT. UAT success gates the PR creation → Pipeline 2.</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1-3</span><div class="step-content"><div class="step-name">Reveille → PAC → Download artifacts</div></div></div>
-              <div class="step-item"><span class="step-num">4</span><div class="step-content"><div class="step-name" onclick="toggleStep('uat-4')">Deploy all solutions → UAT <span class="step-expand-icon" id="si-uat-4">▶</span></div><div class="step-details" id="sd-uat-4">
-                <div class="step-detail-item"><code>solution_type: Managed</code></div>
-                <div class="step-detail-item"><code>enable_blocking_check: true</code></div>
-                <div class="step-detail-item"><code>enable_version_compare: true</code> — compares against Intg</div>
-                <div class="step-detail-item"><code>previous_environment_url: PP_INTG_URL</code></div>
-                <div class="step-detail-item"><code>servicenow_enabled: vars.SERVICENOW_ENABLED == 'true'</code> <span class="step-tag tag-snow">SNOW CR</span></div>
-              </div></div></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- FRS -->
-        <div class="job-card band-deploy-managed narrow" id="card-frs">
-          <div class="job-header" onclick="toggleCard('frs')">
-            <span class="job-emoji">🚀</span>
-            <div class="job-info">
-              <div class="job-name">Deploy | FRS</div>
-              <div class="job-meta"><span>Managed · Optional gate</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-frs">▼</span>
-          </div>
-          <div class="job-body" id="body-frs">
-            <div class="job-purpose">Deploy managed solution to FRS (Full Regression System). Runs parallel to Dev/Intg/UAT/Perf.</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1-3</span><div class="step-content"><div class="step-name">Reveille → PAC → Download artifacts</div></div></div>
-              <div class="step-item"><span class="step-num">4</span><div class="step-content"><div class="step-name" onclick="toggleStep('frs-4')">Deploy all solutions → FRS <span class="step-expand-icon" id="si-frs-4">▶</span></div><div class="step-details" id="sd-frs-4">
-                <div class="step-detail-item"><code>solution_type: Managed</code></div>
-                <div class="step-detail-item"><code>enable_version_compare: true</code></div>
-                <div class="step-detail-item"><code>previous_environment_url: PP_UAT_URL</code></div>
-                <div class="step-detail-item"><code>servicenow_enabled: vars.SERVICENOW_ENABLED == 'true'</code> <span class="step-tag tag-snow">SNOW CR</span></div>
-              </div></div></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Perf -->
-        <div class="job-card band-deploy-managed narrow" id="card-perf">
-          <div class="job-header" onclick="toggleCard('perf')">
-            <span class="job-emoji">🚀</span>
-            <div class="job-info">
-              <div class="job-name">Deploy | Perf</div>
-              <div class="job-meta"><span>Managed · Optional gate</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-perf">▼</span>
-          </div>
-          <div class="job-body" id="body-perf">
-            <div class="job-purpose">Deploy managed solution to Perf (Performance/Load testing environment).</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1-3</span><div class="step-content"><div class="step-name">Reveille → PAC → Download artifacts</div></div></div>
-              <div class="step-item"><span class="step-num">4</span><div class="step-content"><div class="step-name" onclick="toggleStep('perf-4')">Deploy all solutions → Perf <span class="step-expand-icon" id="si-perf-4">▶</span></div><div class="step-details" id="sd-perf-4">
-                <div class="step-detail-item"><code>solution_type: Managed</code></div>
-                <div class="step-detail-item"><code>enable_version_compare: true</code></div>
-                <div class="step-detail-item"><code>previous_environment_url: PP_FRS_URL</code></div>
-                <div class="step-detail-item"><code>servicenow_enabled: vars.SERVICENOW_ENABLED == 'true'</code> <span class="step-tag tag-snow">SNOW CR</span></div>
-              </div></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Row 5: PR + Summary -->
-    <div class="flow-row" style="margin-bottom:12px">
-      <div class="flow-connector"><div class="flow-arrow">↓</div><div class="flow-arrow-label">UAT success</div></div>
-      <div class="parallel-group">
-        <div class="job-card band-pr" id="card-pr">
-          <div class="job-header" onclick="toggleCard('pr')">
-            <span class="job-emoji">🔀</span>
-            <div class="job-info">
-              <div class="job-name">Open PR → main</div>
-              <div class="job-meta"><span>if: UAT success &amp;&amp; export success/skipped</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-pr">▼</span>
-          </div>
-          <div class="job-body" id="body-pr">
-            <div class="job-purpose">Create PR from feature/pipeline-N → main. Merging this PR fires Pipeline 2.</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1</span><div class="step-content"><div class="step-name" onclick="toggleStep('pr-1')">Create PR feature → main <span class="step-expand-icon" id="si-pr-1">▶</span></div><div class="step-details" id="sd-pr-1">
-                <div class="step-detail-item">Uses <code>GHA_CORE_PAT</code> (bypasses Actions PR restriction). <code>gh pr create --head feature/pipeline-{N} --base main</code>.</div>
-                <div class="step-detail-item">PR title: <code>Release: pipeline run #N</code> (prefixed <code>[MOCK]</code> in mock mode).</div>
-                <div class="step-detail-item">PR body: run link, branch, solution list, actor, mock flag, gate status checklist per environment.</div>
-              </div></div></div>
-            </div>
-          </div>
-        </div>
-        <div class="flow-connector" style="padding-top:22px"><div class="flow-arrow" style="color:#30363d">&nbsp;</div></div>
-        <div class="job-card band-summary" id="card-p1summary">
-          <div class="job-header" onclick="toggleCard('p1summary')">
-            <span class="job-emoji">📋</span>
-            <div class="job-info">
-              <div class="job-name">Pipeline Summary <span class="step-tag tag-always">always()</span></div>
-            </div>
-            <span class="job-toggle" id="toggle-p1summary">▼</span>
-          </div>
-          <div class="job-body" id="body-p1summary">
-            <div class="job-purpose">Aggregate all per-job summaries; send failure email if any stage failed.</div>
-            <div class="steps-list">
-              <div class="step-item"><span class="step-num">1-2</span><div class="step-content"><div class="step-name">Checkout GHA-Dynamics + GHA-Core</div></div></div>
-              <div class="step-item"><span class="step-num">3</span><div class="step-content"><div class="step-name" onclick="toggleStep('p1s-3')">Download job summary records <span class="step-expand-icon" id="si-p1s-3">▶</span></div><div class="step-details" id="sd-p1s-3"><div class="step-detail-item"><code>download-artifact@v4</code> with <code>pattern: job-summary-*</code>, <code>continue-on-error: true</code>. Downloads per-job JSON records from <code>Write-BuildSummary.ps1</code> into <code>job-summaries/</code>.</div></div></div></div>
-              <div class="step-item"><span class="step-num">4</span><div class="step-content"><div class="step-name" onclick="toggleStep('p1s-4')">Write pipeline summary <span class="step-expand-icon" id="si-p1s-4">▶</span></div><div class="step-details" id="sd-p1s-4"><div class="step-detail-item"><code>Write-PipelineSummary.ps1</code> — aggregates all per-job JSON records, writes consolidated markdown table to <code>$GITHUB_STEP_SUMMARY</code>: all solutions × all environments, build results, deploy results, run metadata.</div></div></div></div>
-              <div class="step-item"><span class="step-num">5</span><div class="step-content"><div class="step-name" onclick="toggleStep('p1s-5')">Send failure notification <span class="step-tag tag-skip">if any failure</span> <span class="step-expand-icon" id="si-p1s-5">▶</span></div><div class="step-details" id="sd-p1s-5"><div class="step-detail-item"><code>dawidd6/action-send-mail@v3</code> — email to <code>ppudot1@gmail.com</code>, subject <code>❌ Build and Deploy FAILED</code>. Body: repo, branch, actor, per-stage results, solution list, run URL.</div></div></div></div>
-            </div>
-          </div>
-        </div>
+    <div class="wf-body">
+      <div class="tbl-wrap" style="padding:12px 16px">
+        <table>
+          <thead><tr><th>Input</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td class="key">solutions</td><td>string</td><td class="default">"all"</td><td>Which solutions to process. "all" = everything in solutions.json. Or comma-separated: "CoreSolution,ExtA"</td></tr>
+            <tr><td class="key">skip_export</td><td>boolean</td><td class="default">false</td><td>Skip sandbox export. Use when you've already committed source to the branch. Automatically true on push events.</td></tr>
+            <tr><td class="key">mock_deploy</td><td>boolean</td><td class="default">false</td><td>🧪 Full dry run — simulates everything without touching Power Platform, JFrog, or git. Safe for testing.</td></tr>
+            <tr><td class="key">checker_error_level</td><td>choice</td><td class="default">HighIssue</td><td>Minimum severity that fails Solution Checker. Options: CriticalIssue, HighIssue, MediumIssue, LowIssue, InformationalIssue</td></tr>
+            <tr><td class="key">base_solutions</td><td>string</td><td class="default">""</td><td>Comma-separated names of prerequisite solutions that must be installed (informational only — never blocks the pipeline).</td></tr>
+            <tr><td class="key">run_pr_validation</td><td>boolean</td><td class="default">false</td><td>Run a build + Solution Checker check before the full pipeline. Always true on push events regardless of this input.</td></tr>
+            <tr><td class="key">run_pipeline_tests</td><td>boolean</td><td class="default">false</td><td>Run the GHA-Core <code>pipeline-test.yml</code> mock suite before proceeding. Adds ~5 min; use when testing Core changes.</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
 
-  <!-- ═══════════════════════════════════ PIPELINE 2 ═══════════════════════════════════ -->
-  <div class="pipeline-section">
-    <div class="pipeline-title">
-      <span>🚢</span>
-      <span>Pipeline 2 — deploy-prod.yml</span>
-      <span class="pt-file">.github/workflows/deploy-prod.yml</span>
-      <span class="pt-trigger">push: main (pipeline-context.json changed) · workflow_dispatch</span>
-    </div>
+  <div class="callout" style="margin-bottom:16px">
+    <strong>Rollback:</strong> Controlled by the <code>ENABLE_ROLLBACK</code> GitHub Environment variable (set per environment in Settings → Environments). When <code>true</code>, the pipeline takes a pre-import backup and auto-restores on failure. There is no <code>enable_backup</code> dispatch input — rollback behaviour is always driven by the environment variable.
+  </div>
 
-    <!-- Guard -->
-    <div class="flow-row" style="margin-bottom:12px">
-      <div class="job-card band-guard" id="card-guard">
-        <div class="job-header" onclick="toggleCard('guard')">
-          <span class="job-emoji">🛡️</span>
-          <div class="job-info">
-            <div class="job-name">Verify trigger</div>
-            <div class="job-meta"><span>ubuntu-latest · always first</span></div>
-          </div>
-          <span class="job-toggle" id="toggle-guard">▼</span>
-        </div>
-        <div class="job-body" id="body-guard">
-          <div class="job-purpose">Log what fired this pipeline. The push + paths trigger on pipeline-context.json is the actual gate.</div>
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num">1</span><div class="step-content"><div class="step-name" onclick="toggleStep('g-1')">Confirm trigger <span class="step-expand-icon" id="si-g-1">▶</span></div><div class="step-details" id="sd-g-1">
-              <div class="step-detail-item"><strong>push event:</strong> logs <code>pipeline-context.json pushed to main</code> + commit SHA + actor.</div>
-              <div class="step-detail-item"><strong>workflow_dispatch:</strong> logs <code>Manual dispatch by @&lt;actor&gt;</code>.</div>
-            </div></div></div>
-          </div>
-        </div>
+  <h3 style="color:#6e7681;font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:20px 0 10px">Job Flow — click any job for details</h3>
+  <div class="pipe-flow">
+    <div class="jb-setup"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🔍</div><div><div class="job-name">Setup</div><div class="job-meta">Resolve matrix</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Reads <code>solutions.json</code> and builds the solution list. Checks secret presence flags. Outputs: matrix, solution_list, solution_count.</p><p><strong>Script:</strong> <code>Resolve-SolutionMatrix.ps1</code></p></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:9px;color:#6e7681;text-align:center;margin-bottom:2px">optional</div>
+      <div class="jb-test"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">✅</div><div><div class="job-name">PR Validation</div><div class="job-meta">push event OR run_pr_validation=true</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Calls GHA-Core <code>_stage-build.yml</code> with no JFrog upload. Runs the full build + Solution Checker. Catches build failures before committing to the full pipeline. Always runs on push events; optional on manual dispatch.</p></div></div></div>
+      <div class="jb-test"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🧪</div><div><div class="job-name">Pipeline Tests</div><div class="job-meta">run_pipeline_tests=true</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Calls GHA-Core <code>pipeline-test.yml</code> with <code>caller_repo</code> set to this repo. Runs Pester unit tests, mock build, and mock deploy end-to-end. Use when testing GHA-Core changes. Adds ~5 min.</p></div></div></div>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:9px;color:#6e7681;text-align:center;margin-bottom:2px">sequential</div>
+      <div class="jb-export"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🔍</div><div><div class="job-name">Lint Config</div><div class="job-meta">→ _reusable-lint.yml</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Calls GHA-Core <code>_reusable-lint.yml</code> reusable workflow. Validates: solutions.json schema and paths (<code>src/solutions/{Name}/deployment-settings-{env}.json</code> convention), deployment-settings JSON validity, project-vars.yml protected keys (including ENABLE_ROLLBACK). Emits <code>::error::</code> annotations on PRs. Blocks export if errors found.</p></div></div></div>
+      <div class="jb-export"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">📤</div><div><div class="job-name">Stage Export</div><div class="job-meta">→ _stage-export.yml</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Calls GHA-Core <code>_stage-export.yml</code>. Only runs if lint-config succeeds. Contains two internal jobs:</p><ul style="margin:8px 0 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:6px"><li style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px"><strong>① export</strong> (matrix, max-parallel:1) — Per solution: reveille → PAC install → publish customizations → PAC export ZIP → PAC unpack to source → export config data. Skipped entirely when <code>skip_export=true</code>.</li><li style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px"><strong>② commit</strong> — Always runs even when export is skipped. Writes <code>pipeline-context.json</code> (run_id, solution list, matrix, feature branch, build timestamp) to the feature branch and pushes. This file is the handshake that triggers Pipeline 2 when the PR merges. Output: <code>feature_branch</code> name.</li></ul></div></div></div>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="jb-build"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🏗️</div><div><div class="job-name">Stage Build</div><div class="job-meta">→ _stage-build.yml</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Calls GHA-Core <code>_stage-build.yml</code>. Contains two internal job types:</p><ul style="margin:8px 0 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:6px"><li style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px"><strong>① job-build</strong> (matrix, parallel — one per solution) — Per solution: reveille → PAC install → version stamp (<code>Set-SolutionVersion.ps1</code>) → strip Managed tag → pack Unmanaged + Managed ZIPs → Solution Checker (mandatory, generates SARIF) → export config data → generate SBOM (CycloneDX v1.5 JSON) → upload GitHub artifact → JFrog upload.</li><li style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px"><strong>② validate-pipeline-config</strong> — Runs after all job-build jobs complete. Prints all resolved pipeline settings to the step summary (environment URLs, feature flags, variable merge result). In non-mock mode: fails if required variables (PP env URLs, checker geo) are missing or empty. Serves as a configuration pre-flight gate before any deploy job starts.</li></ul></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:9px;color:#6e7681;text-align:center;margin-bottom:2px">all 5 start together</div>
+      <div class="jb-dev"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🚀</div><div><div class="job-name">Deploy Dev</div><div class="job-meta">Unmanaged · No checks</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Unmanaged. No blocking/version checks. Fast developer feedback. Previous env: none.</p></div></div></div>
+      <div class="jb-managed"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🚀</div><div><div class="job-name">Deploy Intg</div><div class="job-meta">Managed · Blocking check</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Managed. Blocking check on. Previous env: Dev.</p></div></div></div>
+      <div class="jb-uat"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🚀</div><div><div class="job-name">Deploy UAT</div><div class="job-meta">Managed · Version compare</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Managed. Blocking + version compare on. <strong>UAT must succeed for PR creation.</strong> Previous env: Intg.</p></div></div></div>
+      <div class="jb-managed"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🚀</div><div><div class="job-name">Deploy FRS</div><div class="job-meta">Managed · Parallel</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Full regression. Runs independently of UAT — doesn't block PR. Previous env: UAT.</p></div></div></div>
+      <div class="jb-managed"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🚀</div><div><div class="job-name">Deploy Perf</div><div class="job-meta">Managed · Parallel</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Performance testing. Runs independently — doesn't block PR. Previous env: FRS.</p></div></div></div>
+    </div>
+    <div class="pipe-arrow">→<small>(UAT)</small></div>
+    <div class="jb-pr"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🔀</div><div><div class="job-name">Create PR → main</div><div class="job-meta">Triggers Pipeline 2</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Opens PR from the feature branch to <code>main</code> via <code>gh pr create</code>. Merging this PR auto-triggers Pipeline 2. Requires: UAT success + Stage Export success + Lint success.</p></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="jb-summary"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">📋</div><div><div class="job-name">Summary</div><div class="job-meta">Always runs</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Calls <code>Write-PipelineSummary.ps1</code>. Sends failure email if any job failed.</p></div></div></div>
+  </div>
+
+  <div class="wf-card" style="margin-top:20px">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">🔍</div><div><div class="wf-card-title">Inside each Deploy job — Steps A through H</div><div class="wf-card-desc">The deploy-all-solutions composite action orchestrates these steps in order for every environment</div></div></div>
+      <div class="wf-toggle">▼</div>
+    </div>
+    <div class="wf-body">
+      <ul class="steps">
+        <li><span class="step-num">A</span><div class="step-body"><div class="step-name">Reveille (Bootstrap)</div><div class="step-desc">Checkout repos, Azure OIDC login, fetch PP credentials from Key Vault, merge global + project variables into GITHUB_ENV.</div></div></li>
+        <li><span class="step-num">B</span><div class="step-body"><div class="step-name">PAC CLI Auth</div><div class="step-desc">Authenticates PAC CLI against the target Dataverse environment using credentials loaded by Reveille.</div></div></li>
+        <li><span class="step-num">C</span><div class="step-body"><div class="step-name">Pre-flight Checks (informational only)</div><div class="step-desc">For each solution: verify artifact present → resolve deployment-settings tokens → base solutions check (warns if missing) → blocking check (warns if async ops in-progress) → version compare (logged for visibility). <strong>None of these checks ever block the pipeline</strong> — all results are warnings. <code>skip_import</code> is always <code>false</code>.</div></div></li>
+        <li><span class="step-num">D</span><div class="step-body"><div class="step-name">ServiceNow: Open Change Request <span class="step-tag tag-snow">if enabled</span></div><div class="step-desc">Creates a Change Request in ServiceNow. Pipeline waits until the CR is approved before proceeding to import. Only reached after all pre-flight checks pass.</div></div></li>
+        <li><span class="step-num loop">E</span><div class="step-body"><div class="step-name">Deploy Loop — sequential per solution</div><div class="step-desc">For each solution: find in target → backup if upgrading (when <code>ENABLE_ROLLBACK=true</code> is set on the GitHub Environment) → import solution (stage-and-upgrade or standard) → import config migration data <span class="step-tag tag-prod">Prod only</span> → publish customizations → activate Cloud Flows + Classic Workflows → tag JFrog artifact <span class="step-tag tag-prod">Prod only</span> → write per-solution summary card.</div></div></li>
+        <li><span class="step-num">F</span><div class="step-body"><div class="step-name">ServiceNow: Close Change Request <span class="step-tag tag-snow">always, if enabled</span></div><div class="step-desc">Closes the CR as successful or unsuccessful based on deploy outcome. Runs even if deploy failed.</div></div></li>
+        <li><span class="step-num">G</span><div class="step-body"><div class="step-name">Post-deploy Verification</div><div class="step-desc">Calls verify-deployment action — queries Dataverse to confirm each solution is installed at the expected version.</div></div></li>
+        <li><span class="step-num">H</span><div class="step-body"><div class="step-name">Upload Backup Artifact + Structured Audit Log</div><div class="step-desc">Uploads backup ZIPs as GitHub Artifacts (30-day retention). Writes a JSON audit log entry (environment, version, actor, timestamp, CR number, step outcomes) for compliance.</div></div></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- PIPELINE 2                                   -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="pipeline2">
+  <div class="section-title">🏁 Pipeline 2 — UAT Re-validation + Production</div>
+  <div class="section-sub">
+    <strong>File:</strong> <code>GHA-Dynamics/.github/workflows/deploy-prod.yml</code><br>
+    Fires automatically when Pipeline 1's PR is merged to <code>main</code>. Re-validates on UAT, then deploys to Production after a human approves.
+  </div>
+
+  <div class="callout warn">
+    <strong>Auto-triggered by PR merge:</strong> In normal flow, you never manually start Pipeline 2. Merging the PR created by Pipeline 1 is the trigger. The pipeline watches for <code>pipeline-context.json</code> being pushed to <code>main</code> — this happens at PR merge time.
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">⚙️</div><div><div class="wf-card-title">Inputs (workflow_dispatch only — for manual re-runs)</div></div></div>
+      <div class="wf-toggle">▼</div>
+    </div>
+    <div class="wf-body">
+      <div class="tbl-wrap" style="padding:12px 16px">
+        <table>
+          <thead><tr><th>Input</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td class="key">mock_deploy</td><td>false</td><td>Simulate UAT + Prod without touching Dataverse</td></tr>
+            <tr><td class="key">skip_uat</td><td>false</td><td>⚠️ BREAK-GLASS: Skip UAT re-validation and go directly to Prod. Use only when UAT environment is unavailable. Prod approval gate still applies regardless. Also controllable via repo variable <code>SKIP_UAT=true</code> for auto-triggered runs (remember to unset after).</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
+  </div>
 
-    <!-- Read context -->
-    <div class="flow-row" style="margin-bottom:12px">
-      <div class="flow-connector"><div class="flow-arrow">↓</div></div>
-      <div class="job-card band-guard wide" id="card-readctx">
-        <div class="job-header" onclick="toggleCard('readctx')">
-          <span class="job-emoji">📖</span>
-          <div class="job-info">
-            <div class="job-name">Read pipeline context</div>
-            <div class="job-meta"><span>needs: guard · outputs run_id, matrix, …</span></div>
-          </div>
-          <span class="job-toggle" id="toggle-readctx">▼</span>
-        </div>
-        <div class="job-body" id="body-readctx">
-          <div class="job-purpose">Parse pipeline-context.json to locate the original Pipeline 1 artifacts.</div>
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num">1</span><div class="step-content"><div class="step-name" onclick="toggleStep('rc-1')">Checkout main (merge commit) <span class="step-expand-icon" id="si-rc-1">▶</span></div><div class="step-details" id="sd-rc-1"><div class="step-detail-item"><code>actions/checkout@v4</code> with <code>ref: main</code>, <code>fetch-depth: 1</code>. Checks out the state of main after PR merge — this is where <code>pipeline-context.json</code> now lives.</div></div></div></div>
-            <div class="step-item"><span class="step-num">2</span><div class="step-content"><div class="step-name" onclick="toggleStep('rc-2')">Parse pipeline-context.json <span class="step-expand-icon" id="si-rc-2">▶</span></div><div class="step-details" id="sd-rc-2">
-              <div class="step-detail-item"><em>Fails immediately</em> if file not found (means Pipeline 1 never completed or PR was created manually).</div>
-              <div class="step-detail-item">Logs all context fields: runId, runNumber, runAttempt, solutionList, featureBranch, triggeredBy.</div>
-              <div class="step-detail-item">Writes to <code>$GITHUB_OUTPUT</code>: <code>run_id</code> (used by deploy jobs to download from correct P1 run), <code>run_number</code>, <code>run_attempt</code>, <code>matrix</code>, <code>solution_list</code>.</div>
-            </div></div></div>
-          </div>
-        </div>
+  <h3 style="color:#6e7681;font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 10px">Job Flow</h3>
+  <div class="pipe-flow">
+    <div class="jb-guard"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🛡️</div><div><div class="job-name">Guard</div><div class="job-meta">Verify trigger</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Confirms how the pipeline started (PR merge vs manual dispatch). Logs commit SHA and actor. Always passes — the push+paths trigger already ensures only correct events reach this workflow.</p></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="jb-setup"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">📖</div><div><div class="job-name">Read Context</div><div class="job-meta">Parse pipeline-context.json</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Reads <code>pipeline-context.json</code> from <code>main</code> to find Pipeline 1's run ID, solution list, and mock_deploy flag. The run ID is used to download the same build artifacts Pipeline 1 uploaded — guaranteeing Prod receives the exact same binaries that passed every test environment.</p></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="jb-uat"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🚀</div><div><div class="job-name">Deploy UAT</div><div class="job-meta">Re-validation gate</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Re-deploys to UAT as final sanity check. Locates Solution Checker SARIF reports from downloaded artifacts for ServiceNow attachment. Skippable via <code>skip_uat</code> dispatch input (manual runs) or repo variable <code>SKIP_UAT=true</code> (auto-triggered runs). Prod approval gate still applies regardless.</p></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="jb-prod"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🔴</div><div><div class="job-name">Deploy Prod</div><div class="job-meta">🚦 Approval required</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Pauses at the Prod GitHub Environment approval gate — a configured reviewer must approve. Then: import managed solution + config data + publish + activate flows + tag JFrog + ServiceNow CR lifecycle.</p></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="jb-summary"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">📋</div><div><div class="job-name">Summary</div><div class="job-meta">Always runs</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Writes Pipeline 2 summary. Sends failure email if UAT or Prod failed.</p></div></div></div>
+  </div>
+
+  <div class="callout" style="margin-top:16px">
+    <strong>pipeline-context.json — the handshake file:</strong> Written by Pipeline 1 to the feature branch (during stage-export). Contains: run_id, run_number, run_attempt, solution list, feature branch name, mock_deploy flag, build matrix. When the PR merges, this file lands on <code>main</code> and triggers Pipeline 2. Pipeline 2 reads it to find the right build artifacts so Prod always deploys what passed UAT.
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- EXPORT SOLUTION                              -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="export-wf">
+  <div class="section-title">📤 Export Solution from Sandbox</div>
+  <div class="section-sub">
+    <strong>File:</strong> <code>GHA-Dynamics/.github/workflows/export-solution.yml</code><br>
+    Used by developers to extract their Power Platform customizations from the sandbox into source code. This is how "what's in Dataverse" becomes "code in GitHub".
+  </div>
+
+  <div class="callout">
+    <strong>Trigger:</strong> Manual only (<code>workflow_dispatch</code>). Run this after making customizations in the sandbox Power Platform environment.
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">⚙️</div><div><div class="wf-card-title">Workflow Inputs</div></div></div>
+      <div class="wf-toggle">▼</div>
+    </div>
+    <div class="wf-body">
+      <div class="tbl-wrap" style="padding:12px 16px">
+        <table>
+          <thead><tr><th>Input</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td class="key">solutions</td><td class="default">"all"</td><td>"all" or comma-separated solution names to export</td></tr>
+            <tr><td class="key">branch_name</td><td class="default">auto-generated</td><td>Feature branch to commit to. Auto-generates <code>export/sdbx-YYYYMMDD-{run}</code> if blank.</td></tr>
+            <tr><td class="key">create_pr</td><td class="default">true</td><td>Open a Pull Request to main after all exports complete</td></tr>
+            <tr><td class="key">commit_message</td><td class="default">"chore: export..."</td><td>Git commit message prefix</td></tr>
+            <tr><td class="key">export_config_data</td><td class="default">false</td><td>Also export configuration migration data. Requires <code>PP_DATA_SCHEMA_FILE</code> to be set.</td></tr>
+            <tr><td class="key">publish_before_export</td><td class="default">true</td><td>Publish customizations in sandbox before exporting (captures latest unpublished changes)</td></tr>
+            <tr><td class="key">mock_deploy</td><td class="default">false</td><td>Dry run — pack existing source as round-trip test. No real Dataverse connection.</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
+  </div>
 
-    <!-- P2: UAT re-validation -->
-    <div class="flow-row" style="margin-bottom:12px">
-      <div class="flow-connector"><div class="flow-arrow">↓</div></div>
-      <div class="job-card band-deploy-uat wide" id="card-p2uat">
-        <div class="job-header" onclick="toggleCard('p2uat')">
-          <span class="job-emoji">🚀</span>
-          <div class="job-info">
-            <div class="job-name">Deploy | UAT (re-validation)</div>
-            <div class="job-meta"><span>🔐 Required Reviewers — final gate before Prod</span></div>
-          </div>
-          <span class="job-toggle" id="toggle-p2uat">▼</span>
-        </div>
-        <div class="job-body" id="body-p2uat">
-          <div class="job-purpose">Re-deploy UAT using Pipeline 1 artifacts. Confirms the exact build going to Prod is still healthy and approved.</div>
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num">1-3</span><div class="step-content"><div class="step-name" onclick="toggleStep('p2uat-1')">Reveille → PAC → Download from P1 run <span class="step-expand-icon" id="si-p2uat-1">▶</span></div><div class="step-details" id="sd-p2uat-1"><div class="step-detail-item">Download step uses <code>run-id: needs.read-context.outputs.run_id</code> — downloads artifacts from the <em>original Pipeline 1 run</em>, not from this P2 run.</div></div></div></div>
-            <div class="step-item"><span class="step-num">4</span><div class="step-content"><div class="step-name" onclick="toggleStep('p2uat-4')">Deploy all solutions → UAT <span class="step-expand-icon" id="si-p2uat-4">▶</span></div><div class="step-details" id="sd-p2uat-4">
-              <div class="step-detail-item">Same settings as P1 UAT. <code>run_number</code> and <code>run_attempt</code> passed from <code>read-context</code> outputs (the P1 values) so artifact names match.</div>
-              <div class="step-detail-item"><code>servicenow_enabled: vars.SERVICENOW_ENABLED == 'true'</code> <span class="step-tag tag-snow">SNOW CR</span></div>
-            </div></div></div>
-          </div>
-        </div>
+  <h3 style="color:#6e7681;font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 10px">Job Flow</h3>
+  <div class="pipe-flow">
+    <div class="jb-setup"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🔍</div><div><div class="job-name">Setup</div><div class="job-meta">Resolve + branch name</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Resolves which solutions to export. Generates or uses the provided branch name.</p></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="jb-export"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">📤</div><div><div class="job-name">Export (sequential)</div><div class="job-meta">max-parallel: 1</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>One solution at a time (PP platform constraint). Per solution: reveille → PAC install → configure git → who-am-i auth → publish → export ZIP → unpack to source → export config data (optional) → commit &amp; push.</p></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="jb-pr"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🔀</div><div><div class="job-name">Create PR</div><div class="job-meta">if create_pr=true</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Opens one PR to main covering all exported solutions. Review, merge, then trigger the build pipeline.</p></div></div></div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- ROLLBACK (GHA-CORE)                          -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="rollback-wf">
+  <div class="section-title">⏪ GHA-Core: rollback.yml — Manual Rollback</div>
+  <div class="section-sub">
+    <strong>File:</strong> <code>GHA-Core/.github/workflows/rollback.yml</code> — run from the GHA-Core repository Actions tab<br>
+    Emergency restore of a Power Platform environment to a previous version using a backup artifact from a prior pipeline run. All rollback logic lives in GHA-Core. GHA-Dynamics has no rollback workflow.
+  </div>
+
+  <div class="callout">
+    <strong>Auto-rollback vs Manual rollback:</strong> When <code>ENABLE_ROLLBACK=true</code> is set on a GitHub Environment, <code>deploy-all-solutions</code> automatically backs up and restores on import failure — no manual intervention. This workflow is for post-deploy regressions where you need to roll back after a successful deploy.
+  </div>
+
+  <div class="callout warn">
+    <strong>⚠️ Safety gate:</strong> The <code>confirm</code> input must exactly match the environment name selected (e.g., type "Prod" when rolling back Prod). The <code>validate</code> job aborts immediately if they don't match — prevents accidental mis-fires.
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">⚙️</div><div><div class="wf-card-title">Inputs (workflow_dispatch)</div></div></div>
+      <div class="wf-toggle">▼</div>
+    </div>
+    <div class="wf-body">
+      <div class="tbl-wrap" style="padding:12px 16px">
+        <table>
+          <thead><tr><th>Input</th><th>Required</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td class="key">environment</td><td class="required">Yes</td><td>Target: Dev, Intg, UAT, FRS, Perf, Prod</td></tr>
+            <tr><td class="key">environment_url</td><td class="required">Yes</td><td>Power Platform environment URL (e.g. <code>https://contoso.crm.dynamics.com</code>)</td></tr>
+            <tr><td class="key">source_repo</td><td class="required">Yes</td><td>GHA-Dynamics repo that produced the backup (format: <code>org/repo</code>)</td></tr>
+            <tr><td class="key">source_run_id</td><td class="required">Yes</td><td>GitHub Actions run ID of the original deploy. Found in the URL: <code>.../actions/runs/<strong>RUN_ID</strong></code></td></tr>
+            <tr><td class="key">backup_artifact_name</td><td class="required">Yes</td><td>Backup artifact name, e.g. <code>backup-UAT-v42</code>. Listed in the Artifacts section of the original run.</td></tr>
+            <tr><td class="key">azure_client_id / azure_tenant_id / azure_subscription_id / azure_key_vault_name</td><td class="required">Yes</td><td>Azure OIDC identity inputs — operator pastes values from the target environment's App Registration</td></tr>
+            <tr><td class="key">confirm</td><td class="required">Yes</td><td>Type the environment name exactly (e.g. "Prod") — safety confirmation</td></tr>
+            <tr><td class="key">mock_deploy</td><td>No</td><td>Simulate rollback without touching Dataverse</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
+  </div>
 
-    <!-- P2: Prod -->
-    <div class="flow-row" style="margin-bottom:12px">
-      <div class="flow-connector"><div class="flow-arrow">↓</div><div class="flow-arrow-label">UAT success</div></div>
-      <div class="job-card band-deploy-prod wide" id="card-prod">
-        <div class="job-header" onclick="toggleCard('prod')">
-          <span class="job-emoji">🚀</span>
-          <div class="job-info">
-            <div class="job-name">Deploy | Prod <span class="step-tag tag-prod">PROD</span></div>
-            <div class="job-meta"><span>🔐 Required Reviewers · config data import · JFrog tag</span></div>
-          </div>
-          <span class="job-toggle" id="toggle-prod">▼</span>
-        </div>
-        <div class="job-body" id="body-prod">
-          <div class="job-condition">if: needs.deploy-uat.result == 'success'</div>
-          <div class="job-purpose">Final production deployment. Only environment where config migration data is imported. Tags artifact in JFrog as prodDeployed.</div>
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num">1-3</span><div class="step-content"><div class="step-name">Reveille → PAC → Download from P1 run</div></div></div>
-            <div class="step-item"><span class="step-num">4</span><div class="step-content"><div class="step-name" onclick="toggleStep('prod-4')">Deploy all solutions → Prod <span class="step-expand-icon" id="si-prod-4">▶</span></div><div class="step-details" id="sd-prod-4">
-              <div class="step-detail-item"><code>solution_type: Managed</code></div>
-              <div class="step-detail-item"><code>enable_blocking_check: true</code></div>
-              <div class="step-detail-item"><code>enable_version_compare: true</code></div>
-              <div class="step-detail-item"><code>import_config_data: true</code> — <strong>PROD ONLY</strong>: imports config migration data ZIP</div>
-              <div class="step-detail-item"><code>previous_environment_url: PP_PERF_URL</code></div>
-              <div class="step-detail-item"><code>tag_prod_deployed: true</code> — calls <code>Invoke-JFrogAction.ps1 tag-prod</code>: sets <code>prodDeployed=true;deployedDate=&lt;ISO&gt;</code> on JFrog artifact</div>
-              <div class="step-detail-item"><code>servicenow_enabled: vars.SERVICENOW_ENABLED == 'true'</code> <span class="step-tag tag-snow">SNOW CR</span></div>
-            </div></div></div>
-          </div>
-        </div>
+  <div class="callout">
+    <strong>Backup artifact naming convention:</strong> <code>backup-{Environment}-v{RunNumber}</code> — e.g. <code>backup-UAT-v42</code>. Created during normal deploys when <code>ENABLE_ROLLBACK=true</code> on the GitHub Environment. Stored as GitHub Artifacts (30-day retention). Used by <code>Invoke-Rollback.ps1</code>.
+  </div>
+
+  <div class="callout">
+    <strong>Job flow:</strong> <code>validate</code> (confirm == environment check) → <code>rollback</code> (OIDC login → AKV fetch → PAC install → download artifact → Invoke-Rollback.ps1). Single rollback job — the environment URL is provided as an input, so there's no need for one job per environment.
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- REUSABLE LINT (GHA-CORE)                     -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="lint-wf">
+  <div class="section-title">🔍 GHA-Core: _reusable-lint.yml — Config Linter</div>
+  <div class="section-sub">
+    <strong>File:</strong> <code>GHA-Core/.github/workflows/_reusable-lint.yml</code><br>
+    Called by <code>build-and-deploy.yml</code> as the <code>lint-config</code> job. Catches configuration mistakes before the export stage. Failures block pipeline progression. No Azure login needed — pure file-system validation.
+  </div>
+
+  <div class="callout">
+    <strong>Trigger:</strong> <code>workflow_call</code> only — called from <code>build-and-deploy.yml</code> lint-config job. Not directly dispatchable. Inputs: <code>solutions_json_path</code> (default <code>solutions.json</code>), <code>project_vars_path</code> (default <code>.github/config/project-vars.yml</code>).
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">📋</div><div><div class="wf-card-title">What gets validated (Python — no Azure login needed)</div></div></div>
+      <div class="wf-toggle">▼</div>
+    </div>
+    <div class="wf-body">
+      <ul class="steps" style="padding-top:8px">
+        <li><span class="step-num">1</span><div class="step-body"><div class="step-name">solutions.json</div><div class="step-desc">Valid JSON, required fields (name, folder, deployOrder, deploymentSettings), folder paths exist, deployOrder values are positive unique integers, dependsOn references resolve to declared solution names.</div></div></li>
+        <li><span class="step-num">2</span><div class="step-body"><div class="step-name">Deployment-settings JSONs</div><div class="step-desc">All paths declared in solutions.json exist on disk, each file is valid JSON, has EnvironmentVariables and ConnectionReferences arrays. Paths not following the <code>src/solutions/{Name}/deployment-settings-{env}.json</code> convention emit a warning. Unresolved <code>#{TOKEN}#</code> placeholders are warned.</div></div></li>
+        <li><span class="step-num">3</span><div class="step-body"><div class="step-name">project-vars.yml</div><div class="step-desc">Valid YAML. Does not contain protected keys (PP_CHECKER_GEO, PP_CHECKER_ERROR_LEVEL, DEFAULT_SOLUTION_TYPE, ENABLE_BACKUP, ENABLE_ROLLBACK). No credential-looking values (password, secret, token, key) in plaintext.</div></div></li>
+        <li><span class="step-num">4</span><div class="step-body"><div class="step-name">XML schema files</div><div class="step-desc">Paths declared in solutions.json (dataSchemaFile) exist and are well-formed XML. Convention: <code>src/solutions/{Name}/config-data-schema.xml</code>.</div></div></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout success">
+    <strong>✅ Errors vs Warnings:</strong> <code>::error::</code> annotations fail the job and block the pipeline. <code>::warning::</code> annotations are visible in the run summary but allow the pipeline to continue. Convention violations (wrong file paths) are warnings; missing files are errors.
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- PIPELINE TEST (GHA-CORE)                     -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="test-wf">
+  <div class="section-title">🧪 GHA-Core: pipeline-test.yml — Pipeline Integration Test</div>
+  <div class="section-sub">
+    <strong>File:</strong> <code>GHA-Core/.github/workflows/pipeline-test.yml</code><br>
+    Called by <code>build-and-deploy.yml</code> (<code>run_pipeline_tests=true</code>) or run standalone from the GHA-Core Actions tab. Validates the complete pipeline in mock mode. Zero cost — no Azure, Dataverse, or JFrog resources consumed.
+  </div>
+
+  <div class="callout">
+    <strong>Triggers:</strong> <code>workflow_call</code> (from build-and-deploy.yml with <code>caller_repo</code> set); PRs to GHA-Core <code>main</code> touching <code>.github/workflows/**</code>, <code>.github/actions/**</code>, <code>.github/scripts/**</code>; push to GHA-Core <code>main</code>; manual <code>workflow_dispatch</code>.
+  </div>
+
+  <div class="pipe-flow" style="margin:16px 0">
+    <div class="jb-setup"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🔍</div><div><div class="job-name">Setup</div><div class="job-meta">Resolve matrix</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Same matrix resolution as real pipelines — validates Resolve-SolutionMatrix.ps1 works correctly.</p></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:9px;color:#6e7681;text-align:center;margin-bottom:2px">parallel</div>
+      <div class="jb-test"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🧪</div><div><div class="job-name">Pester Unit Tests</div><div class="job-meta">PowerShell tests</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Runs Pester test suite from <code>GHA-Core/.github/servicenow/Tests/Unit/Dynamics/</code>. Validates all PS scripts. Uploads JUnit XML as artifact.</p></div></div></div>
+      <div class="jb-build"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🔨</div><div><div class="job-name">Mock Build</div><div class="job-meta">Calls _stage-build.yml</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Calls <code>_stage-build.yml</code> with <code>mock_deploy=true</code>. Validates the full build reusable workflow is callable with current inputs.</p></div></div></div>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="jb-dev"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">🚀</div><div><div class="job-name">Mock Deploy Dev</div><div class="job-meta">deploy-all-solutions mock</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Mirrors the real pipeline's deploy-dev job exactly. Calls deploy-all-solutions composite action with mock_deploy=true. Validates the full action wiring end-to-end without touching Dataverse.</p></div></div></div>
+    <div class="pipe-arrow">→</div>
+    <div class="jb-summary"><div class="job-box"><div class="job-box-hdr" onclick="tog(this)"><div class="job-emoji">📋</div><div><div class="job-name">Test Summary</div></div><div class="job-toggle">▼</div></div><div class="job-body"><p>Combined pass/fail table for all test jobs. Fails the job if any check failed.</p></div></div></div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- GHA-CORE REUSABLES                           -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="stage-export">
+  <div class="section-title">📦 GHA-Core: _stage-export.yml</div>
+  <div class="section-sub">
+    <strong>File:</strong> <code>GHA-Core/.github/workflows/_stage-export.yml</code><br>
+    Reusable export stage. Two modes: full sandbox export, or skip-export (source already on branch).
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">⚙️</div><div><div class="wf-card-title">Inputs (workflow_call)</div></div></div>
+      <div class="wf-toggle">▼</div>
+    </div>
+    <div class="wf-body">
+      <div class="tbl-wrap" style="padding:12px 16px">
+        <table>
+          <thead><tr><th>Input</th><th>Required</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td class="key">matrix</td><td class="required">Yes</td><td>—</td><td>JSON array of solution objects from setup job</td></tr>
+            <tr><td class="key">source_environment_url</td><td class="required">Yes</td><td>—</td><td>Sandbox Power Platform URL to export from</td></tr>
+            <tr><td class="key">solution_list</td><td class="required">Yes</td><td>—</td><td>Comma-separated names — used by commit job to copy source trees</td></tr>
+            <tr><td class="key">skip_export</td><td>No</td><td>false</td><td>Skip export matrix jobs — source already committed. Commit job still writes pipeline-context.json.</td></tr>
+            <tr><td class="key">mock_deploy</td><td>No</td><td>false</td><td>Simulate export. Git operations still run in mock mode.</td></tr>
+            <tr><td class="key">azure_client_id / azure_tenant_id / azure_subscription_id / azure_key_vault_name</td><td>No</td><td>—</td><td>Azure identity inputs — passed from caller's <code>vars.*</code></td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
+  </div>
+  <div class="callout"><strong>Output:</strong> <code>feature_branch</code> — the branch name created or used. Consumed by Pipeline 1's create-main-pr job.</div>
 
-    <!-- P2: Summary -->
-    <div class="flow-row">
-      <div class="flow-connector"><div class="flow-arrow">↓</div></div>
-      <div class="job-card band-summary" id="card-p2summary">
-        <div class="job-header" onclick="toggleCard('p2summary')">
-          <span class="job-emoji">📋</span>
-          <div class="job-info">
-            <div class="job-name">Pipeline 2 Summary <span class="step-tag tag-always">always()</span></div>
-          </div>
-          <span class="job-toggle" id="toggle-p2summary">▼</span>
-        </div>
-        <div class="job-body" id="body-p2summary">
-          <div class="job-purpose">Write consolidated UAT/Prod summary; send failure email if either stage failed.</div>
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num">1</span><div class="step-content"><div class="step-name" onclick="toggleStep('p2s-1')">Write summary <span class="step-expand-icon" id="si-p2s-1">▶</span></div><div class="step-details" id="sd-p2s-1"><div class="step-detail-item">Writes markdown table to <code>$GITHUB_STEP_SUMMARY</code>: Pipeline 1 run number, solution list, UAT result, Prod result, actor.</div></div></div></div>
-            <div class="step-item"><span class="step-num">2</span><div class="step-content"><div class="step-name" onclick="toggleStep('p2s-2')">Send failure notification <span class="step-tag tag-skip">if UAT/Prod failed</span> <span class="step-expand-icon" id="si-p2s-2">▶</span></div><div class="step-details" id="sd-p2s-2"><div class="step-detail-item">Email subject: <code>❌ UAT/Prod Deployment FAILED (Pipeline 2) — run #N</code>. Body: Pipeline 1 run number, solution list, UAT/Prod results, actor, run URL.</div></div></div></div>
-          </div>
+  <div class="callout" style="margin-top:10px">
+    <strong>Internal job flow:</strong>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 12px;font-size:12px"><strong>export</strong> (matrix · max-parallel:1)<br><span style="color:#8b949e;font-size:11px">per solution, skipped when skip_export=true</span></div>
+      <span style="color:#6e7681">→</span>
+      <div style="background:#0d419d22;border:1px solid #1f6feb;border-radius:6px;padding:6px 12px;font-size:12px"><strong>commit</strong> (always runs)<br><span style="color:#8b949e;font-size:11px">writes pipeline-context.json → pushes → outputs feature_branch</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="section" id="stage-build">
+  <div class="section-title">🏗️ GHA-Core: _stage-build.yml</div>
+  <div class="section-sub">
+    <strong>File:</strong> <code>GHA-Core/.github/workflows/_stage-build.yml</code><br>
+    Reusable build stage. Fans out <code>_job-build.yml</code> per solution in parallel, then runs a <code>validate-pipeline-config</code> job that gate-checks all settings before any deploy can start.
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">⚙️</div><div><div class="wf-card-title">Key Inputs (workflow_call)</div></div></div>
+      <div class="wf-toggle">▼</div>
+    </div>
+    <div class="wf-body">
+      <div class="tbl-wrap" style="padding:12px 16px">
+        <table>
+          <thead><tr><th>Input</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td class="key">matrix</td><td class="required">required</td><td>JSON array of solution objects</td></tr>
+            <tr><td class="key">mock_deploy</td><td>false</td><td>Simulate build — no JFrog uploads, no real Solution Checker</td></tr>
+            <tr><td class="key">jfrog_url</td><td>""</td><td>JFrog base URL. Leave blank to skip JFrog upload.</td></tr>
+            <tr><td class="key">jfrog_repo</td><td>power-platform</td><td>JFrog repository name</td></tr>
+            <tr><td class="key">use_exported_source</td><td>false</td><td>Download exported-source artifact from stage-export instead of packing from committed source</td></tr>
+            <tr><td class="key">checker_error_level</td><td>CriticalIssueCount</td><td>Solution Checker failure threshold</td></tr>
+            <tr><td class="key">base_solutions, solution_count, solution_list, pp_*_url, pp_*_set flags</td><td>—</td><td>Forwarded from caller to the validate job for pipeline config display</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>_job-build.yml per solution:</strong> version stamp → pack managed + unmanaged ZIPs (PAC CLI) → Solution Checker (SARIF output — always on, cannot be disabled) → generate SBOM (CycloneDX v1.5 JSON) → upload to JFrog → upload <code>solution-artifact-{name}</code> to GitHub Artifacts (7-day retention).
+  </div>
+
+  <div class="callout" style="margin-top:10px">
+    <strong>Internal job flow:</strong>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 12px;font-size:12px"><strong>job-build</strong> (matrix · parallel)<br><span style="color:#8b949e;font-size:11px">one per solution — version stamp, pack, checker, SBOM, JFrog upload</span></div>
+      <span style="color:#6e7681">→</span>
+      <div style="background:#0d419d22;border:1px solid #1f6feb;border-radius:6px;padding:6px 12px;font-size:12px"><strong>validate-pipeline-config</strong> (after all job-build complete)<br><span style="color:#8b949e;font-size:11px">prints all resolved vars · fails if PP env URLs missing · gates every deploy job</span></div>
+    </div>
+    <p style="margin:8px 0 0;font-size:12px;color:#8b949e">Every deploy job in build-and-deploy.yml has <code>needs: [stage-build]</code> — so if validate-pipeline-config fails, ALL five deploy jobs are blocked before they start.</p>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- COMPOSITE ACTIONS                            -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="actions-ref">
+  <div class="section-title">🔧 Composite Actions Reference</div>
+  <div class="section-sub">Reusable action building blocks in GHA-Core. Each is a named sequence of steps callable from any job.</div>
+
+  <!-- REVEILLE -->
+  <div class="wf-card">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">🌅</div><div>
+        <div class="wf-card-title">reveille — Bootstrap &amp; Credential Fetch</div>
+        <div class="wf-card-path">GHA-Core/.github/actions/dynamics/reveille/action.yml</div>
+        <div class="wf-card-desc">First step of every deploy/build job. Checks out repos, logs into Azure, fetches credentials from Key Vault, merges variables.</div>
+      </div></div>
+      <div class="wf-toggle">▼</div>
+    </div>
+    <div class="wf-body">
+      <div class="sub-section">
+        <div class="sub-title">Steps (in order)</div>
+        <ul class="steps" style="padding-top:0">
+          <li><span class="step-num">1</span><div class="step-body"><div class="step-name">Checkout caller repo</div><div class="step-desc">Checks out GHA-Dynamics (full history for version stamping).</div></div></li>
+          <li><span class="step-num">2</span><div class="step-body"><div class="step-name">Checkout GHA-Core to .ci/</div><div class="step-desc">Makes all GHA-Core scripts and actions available locally for the job.</div></div></li>
+          <li><span class="step-num">3</span><div class="step-body"><div class="step-name">OIDC Diagnostic <span class="step-tag tag-skip">skipped in mock</span></div><div class="step-desc">Validates Azure identity inputs are non-empty and prints the OIDC subject claim. Essential for diagnosing AADSTS700016 (wrong Client ID) and AADSTS70021 (missing federated credential) errors.</div></div></li>
+          <li><span class="step-num">4</span><div class="step-body"><div class="step-name">Azure Login (OIDC) <span class="step-tag tag-skip">skipped in mock</span></div><div class="step-desc">Logs into Azure using a temporary OIDC token — no stored password needed. Token is issued by GitHub and valid only for this job's duration.</div></div></li>
+          <li><span class="step-num">5</span><div class="step-body"><div class="step-name">Azure Key Vault secret fetch <span class="step-tag tag-skip">skipped in mock</span></div><div class="step-desc">Fetches PP_APP_ID, PP_CLIENT_SECRET, PP_TENANT_ID from the project's Key Vault. Optionally fetches JFrog, MuleSoft, ServiceNow credentials. Each secret is masked with <code>::add-mask::</code> before being written to GITHUB_ENV.</div></div></li>
+          <li><span class="step-num">6</span><div class="step-body"><div class="step-name">Merge Variables</div><div class="step-desc">Runs <code>Merge-Variables.ps1</code>: reads <code>global-vars.yml</code> (GHA-Core) + <code>project-vars.yml</code> (GHA-Dynamics), merges (project overrides non-protected globals), writes all to GITHUB_ENV for use by all subsequent steps. Exits 1 if project tries to override a protected key.</div></div></li>
+        </ul>
+      </div>
+      <div class="sub-section">
+        <div class="sub-title">Inputs</div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Input</th><th>Default</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td class="key">mock_deploy</td><td>false</td><td>Skip Azure login and AKV fetch entirely</td></tr>
+              <tr><td class="key">jfrog_enabled</td><td>false</td><td>Fetch jfrog-api-key from AKV</td></tr>
+              <tr><td class="key">mulesoft_enabled</td><td>false</td><td>Fetch mulesoft-client-id + mulesoft-client-secret from AKV</td></tr>
+              <tr><td class="key">servicenow_enabled</td><td>false</td><td>Fetch snow-base-uri, snow-oauth-client-id, snow-oauth-client-secret from AKV</td></tr>
+              <tr><td class="key">azure_client_id</td><td>—</td><td>App Registration Client ID. Pass <code>vars.AZURE_CLIENT_ID</code> from caller.</td></tr>
+              <tr><td class="key">azure_tenant_id</td><td>—</td><td>Azure AD Tenant ID. Pass <code>vars.AZURE_TENANT_ID</code>.</td></tr>
+              <tr><td class="key">azure_subscription_id</td><td>—</td><td>Azure Subscription ID. Pass <code>vars.AZURE_SUBSCRIPTION_ID</code>.</td></tr>
+              <tr><td class="key">azure_key_vault_name</td><td>—</td><td>Key Vault name. Set as a GitHub Environment Variable to get per-environment Key Vault isolation.</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ═══════════════════════════════════ SHARED ACTIONS ═══════════════════════════════════ -->
-  <div class="shared-section">
-    <div class="shared-title">⚙️ Shared Action References</div>
-    <div class="shared-grid">
-
-      <!-- Reveille -->
-      <div class="shared-card">
-        <div class="shared-card-header" onclick="toggleShared('reveille')">
-          <div>
-            <div class="shared-card-title">🌅 Reveille — Bootstrap Action</div>
-            <div class="shared-card-path">.github/actions/dynamics/reveille/action.yml · Called by every job as step 1</div>
-          </div>
-          <span class="shared-toggle" id="st-reveille">▼</span>
-        </div>
-        <div class="shared-body" id="sb-reveille">
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num">R1</span><div class="step-content"><div class="step-name" onclick="toggleStep('r-1')">Checkout calling repository <span class="step-expand-icon" id="si-r-1">▶</span></div><div class="step-details" id="sd-r-1"><div class="step-detail-item"><code>actions/checkout@v4</code> with <code>fetch-depth: 0</code>. Checks out GHA-Dynamics so scripts can access <code>solutions.json</code>, <code>deployment-settings/</code>, etc.</div></div></div></div>
-            <div class="step-item"><span class="step-num">R2</span><div class="step-content"><div class="step-name" onclick="toggleStep('r-2')">Checkout GHA-Core CI scripts <span class="step-expand-icon" id="si-r-2">▶</span></div><div class="step-details" id="sd-r-2"><div class="step-detail-item"><code>actions/checkout@v4</code> → <code>ppudot2-cloud/GHA-Core@main</code>, auth via <code>env.GHA_CORE_PAT</code>, path <code>.ci/</code>. Makes available: 14 PS scripts, <code>global-vars.yml</code>, ServiceNow PS module.</div></div></div></div>
-            <div class="step-item"><span class="step-num">R3</span><div class="step-content"><div class="step-name" onclick="toggleStep('r-3')">Azure Login (OIDC) <span class="step-tag tag-mock">skipped in mock</span> <span class="step-expand-icon" id="si-r-3">▶</span></div><div class="step-details" id="sd-r-3"><div class="step-detail-item"><code>azure/login@v2</code> — Workload Identity Federation. GitHub issues a short-lived JWT → Azure AD validates against Federated Identity Credential → issues temporary access token valid only for the runner job duration. <em>No client secret stored in GitHub.</em></div></div></div></div>
-            <div class="step-item"><span class="step-num">R4</span><div class="step-content"><div class="step-name" onclick="toggleStep('r-4')">Fetch secrets from Azure Key Vault <span class="step-tag tag-mock">skipped in mock</span> <span class="step-expand-icon" id="si-r-4">▶</span></div><div class="step-details" id="sd-r-4">
-              <div class="step-detail-item">Always: <code>pp-app-id → PP_APP_ID</code>, <code>pp-client-secret → PP_CLIENT_SECRET</code>, <code>pp-tenant-id → PP_TENANT_ID</code>.</div>
-              <div class="step-detail-item">If <code>jfrog_enabled=true</code>: <code>jfrog-api-key → JFROG_TOKEN</code>.</div>
-              <div class="step-detail-item">If <code>mulesoft_enabled=true</code>: <code>mulesoft-client-id/secret → MULESOFT_CLIENT_ID/SECRET</code>.</div>
-              <div class="step-detail-item">If <code>servicenow_enabled=true</code>: <code>snow-base-uri → SERVICENOWMURI</code>, <code>snow-oauth-client-id/secret → SNOW_OAUTH_*</code>.</div>
-              <div class="step-detail-item"><em>Each value is masked (<code>::add-mask::</code>) before writing to <code>$GITHUB_ENV</code> — never appears in logs.</em></div>
-            </div></div></div>
-            <div class="step-item"><span class="step-num">R5</span><div class="step-content"><div class="step-name" onclick="toggleStep('r-5')">Merge global + project variables <span class="step-expand-icon" id="si-r-5">▶</span></div><div class="step-details" id="sd-r-5">
-              <div class="step-detail-item"><code>Merge-Variables.ps1</code> reads <code>global-vars.yml</code> (GHA-Core defaults) + <code>project-vars.yml</code> (GHA-Dynamics overrides).</div>
-              <div class="step-detail-item">Checks each project key against <code>protected_keys</code> list — <em>fails immediately if project tries to override a protected key.</em></div>
-              <div class="step-detail-item">Azure identity keys (<code>AZURE_*</code>) excluded from merge (OIDC already set them).</div>
-              <div class="step-detail-item">Writes all merged <code>KEY=value</code> pairs to <code>$GITHUB_ENV</code>.</div>
-            </div></div></div>
-            <div class="step-item"><span class="step-num">R6</span><div class="step-content"><div class="step-name" onclick="toggleStep('r-6')">Register JFrog PS module repo <span class="step-tag tag-skip">if jfrog_enabled</span> <span class="step-expand-icon" id="si-r-6">▶</span></div><div class="step-details" id="sd-r-6"><div class="step-detail-item">Unregisters <code>PSGallery</code> (no internet in restricted environments). Registers JFrog Artifactory NuGet v2 feed as trusted PS repository named <code>"JFrog"</code> using <code>JFROG_TOKEN</code> + <code>JFROG_URL</code>/<code>JFROG_REPO</code>. All subsequent <code>Install-Module</code> calls resolve from JFrog.</div></div></div></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Deploy All Solutions -->
-      <div class="shared-card">
-        <div class="shared-card-header" onclick="toggleShared('deploy-all')">
-          <div>
-            <div class="shared-card-title">🔄 Deploy All Solutions</div>
-            <div class="shared-card-path">.github/actions/dynamics/deploy-all-solutions/action.yml · Called by every deploy job as step 4</div>
-          </div>
-          <span class="shared-toggle" id="st-deploy-all">▼</span>
-        </div>
-        <div class="shared-body" id="sb-deploy-all">
-          <div class="job-purpose" style="padding:8px 14px">Deploys every solution in <code>solutions_json</code> to ONE environment in <code>deployOrder</code> sequence. Pre-conditions: reveille, pac-install, download-artifact must have already run.</div>
-          <div style="margin:6px 12px 0;padding:7px 10px;background:rgba(187,128,9,.08);border:1px solid rgba(187,128,9,.2);border-radius:6px;font-size:10px;color:#e3b341;line-height:1.6">
-            <strong>Informational only — never fails the pipeline.</strong> Pre-flight checks run before ServiceNow so the user can see environment health in the Actions log before a CR is opened. Any issues (missing base solution, blocking op, artifact not found) are logged as ⚠️ warnings and the deployment proceeds. If the environment truly cannot accept the import, the actual <code>pac solution import</code> in the deploy loop will surface the real Dataverse error with full context.
-          </div>
-
-          <div style="padding:8px 12px 2px;font-size:11px;font-weight:600;color:#58a6ff">STEP A — PAC Auth</div>
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num">A</span><div class="step-content"><div class="step-name" onclick="toggleStep('da-pac')">PAC auth — target environment <span class="step-expand-icon" id="si-da-pac">▶</span></div><div class="step-details" id="sd-da-pac"><div class="step-detail-item">Real: <code>pac auth create --name target-&lt;env&gt; --url &lt;env_url&gt; --applicationId PP_APP_ID --clientSecret PP_CLIENT_SECRET --tenant PP_TENANT_ID</code> → <code>pac auth select --name target-&lt;env&gt;</code>. Needed before pre-flight because base-solution check uses <code>pac solution list</code>. Mock: logs skip.</div></div></div></div>
-          </div>
-
-          <div style="padding:6px 12px 0;font-size:11px;font-weight:600;color:#e3b341">STEP B — Pre-flight Loop (ALL solutions · informational · never fails pipeline)</div>
-          <div class="loop-box" style="border-color:rgba(187,128,9,.3)">
-            <div class="loop-title" style="color:#e3b341">Pre-flight checks — all solutions in deployOrder · warns on issues · always continues · writes preflight-results.json</div>
-            <div class="loop-step"><span class="loop-step-num" style="color:#e3b341;border-color:rgba(187,128,9,.3);background:rgba(187,128,9,.1)">1</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-1')">Verify artifact present <span class="step-expand-icon" id="si-da-1">▶</span></div><div class="loop-step-details" id="sd-da-1"><div class="step-detail-item">Real: checks <code>out/&lt;name&gt;/&lt;name&gt;-&lt;version&gt;_managed.zip</code> exists. Logs ⚠️ warning if missing (download-artifact may have failed or artifact name mismatch). Deployment continues regardless. Mock: creates placeholder stub ZIP.</div></div></div></div>
-            <div class="loop-step"><span class="loop-step-num" style="color:#e3b341;border-color:rgba(187,128,9,.3);background:rgba(187,128,9,.1)">2</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-2')">Resolve deployment settings tokens <span class="step-expand-icon" id="si-da-2">▶</span></div><div class="loop-step-details" id="sd-da-2"><div class="step-detail-item">Reads <code>deployment-settings/&lt;env&gt;/&lt;name&gt;.json</code>. Scans for <code>#{TOKEN_NAME}#</code> patterns, reads <code>$env:TOKEN_NAME</code> for each match, writes resolved JSON to <code>out/&lt;name&gt;/deployment-settings-resolved.json</code>. Mock: skips resolution.</div></div></div></div>
-            <div class="loop-step"><span class="loop-step-num" style="color:#e3b341;border-color:rgba(187,128,9,.3);background:rgba(187,128,9,.1)">3</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-3')">Verify base solutions <span class="step-tag tag-skip">if base_solutions set</span> <span class="step-expand-icon" id="si-da-3">▶</span></div><div class="loop-step-details" id="sd-da-3"><div class="step-detail-item"><code>pac solution list --environment &lt;url&gt;</code> for each base solution name. Logs ⚠️ warning if any base solution is missing — deployment continues, but import will likely fail with a Dataverse dependency error.</div></div></div></div>
-            <div class="loop-step"><span class="loop-step-num" style="color:#e3b341;border-color:rgba(187,128,9,.3);background:rgba(187,128,9,.1)">4</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-4')">Blocking check <span class="step-tag tag-skip">if enable_blocking_check</span> <span class="step-expand-icon" id="si-da-4">▶</span></div><div class="loop-step-details" id="sd-da-4"><div class="step-detail-item"><code>Invoke-BlockingCheck.ps1</code> queries Dataverse for in-progress async operations (imports, upgrades, publishes). Fails if blocking operations found — no SNOW CR opened, saves approvers from approving a deployment that can't proceed yet.</div></div></div></div>
-            <div class="loop-step"><span class="loop-step-num" style="color:#e3b341;border-color:rgba(187,128,9,.3);background:rgba(187,128,9,.1)">5</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-5')">Version compare <span class="step-tag tag-skip">if enable_version_compare</span> <span class="step-expand-icon" id="si-da-5">▶</span></div><div class="loop-step-details" id="sd-da-5"><div class="step-detail-item"><code>Compare-SolutionVersion.ps1</code>: reads artifact version from filename; queries Dataverse API on <code>previous_environment_url</code> and <code>target_environment_url</code>. Sets <code>skip_import=true</code> if artifact ≤ target version (no SNOW needed). Returns <code>0.0.0.0</code> (non-fatal log) if previous env never deployed.</div></div></div></div>
-            <div class="loop-step" style="padding-top:6px;border-top:1px dashed rgba(187,128,9,.25);margin-top:4px"><span class="loop-step-num" style="color:#56d364;border-color:rgba(46,160,67,.3);background:rgba(46,160,67,.1)">✓</span><div class="loop-step-content"><div class="loop-step-name" style="color:#56d364">Writes preflight-results.json with per-solution skip_import flags + resolved paths</div></div></div>
-          </div>
-
-          <div style="padding:6px 12px 0;font-size:11px;font-weight:600;color:#c084fc">STEP C — ServiceNow Pre-Deploy <span style="font-weight:400;color:#6e7681">(always reached after pre-flight · informational checks never block)</span></div>
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num" style="color:#c084fc;border-color:rgba(130,80,255,.3);background:rgba(130,80,255,.1)">C</span><div class="step-content"><div class="step-name" onclick="toggleStep('da-pre-snow')">ServiceNow Pre-Deploy <span class="step-tag tag-snow">if SNOW enabled · BLOCKS</span> <span class="step-expand-icon" id="si-da-pre-snow">▶</span></div><div class="step-details" id="sd-da-pre-snow"><div class="step-detail-item">Calls <code>servicenow-change@main phase: pre-deploy</code>. Opens CR, sets change window, requests approval, polls until approved. <em>Pipeline is blocked here until SNOW approver approves the CR.</em> Only runs if <code>enable_servicenow=true</code>. Always reached — pre-flight warnings do not gate this step. See ServiceNow CR Lifecycle reference for all 8 sub-steps.</div></div></div></div>
-          </div>
-
-          <div style="padding:6px 12px 0;font-size:11px;font-weight:600;color:#56d364">STEP D — Deploy Loop (ALL solutions · SNOW approved · try/catch with inline rollback)</div>
-          <div class="loop-box" style="border-color:rgba(46,160,67,.3)">
-            <div class="loop-title" style="color:#56d364">Deploy loop — reads preflight-results.json for skip_import + resolved settings</div>
-            <div class="loop-step"><span class="loop-step-num">6</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-6')">Find solution in target environment <span class="step-expand-icon" id="si-da-6">▶</span></div><div class="loop-step-details" id="sd-da-6"><div class="step-detail-item"><code>pac solution list --environment &lt;url&gt; --json</code>. Parses JSON to find solution by <code>SolutionUniqueName</code>. If found: sets <code>$solutionExists=true</code>. Determines import mode: <strong>UPGRADE</strong> (holding pattern) vs <strong>INSTALL</strong> (standard). Mock: treats as first install.</div></div></div></div>
-            <div class="loop-step"><span class="loop-step-num">7</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-7')">Backup <span class="step-tag tag-skip">upgrades only · if enable_backup</span> <span class="step-expand-icon" id="si-da-7">▶</span></div><div class="loop-step-details" id="sd-da-7"><div class="step-detail-item">Only on upgrades (<code>solutionExists=true</code>, not skip_import). Skipped on first installs. Real: <code>pac solution export --name &lt;name&gt; --path backup/&lt;name&gt;_&lt;env&gt;_backup.zip --managed</code>. Used by catch block for inline rollback.</div></div></div></div>
-            <div class="loop-step"><span class="loop-step-num">8</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-8')">Import solution <span class="step-expand-icon" id="si-da-8">▶</span></div><div class="loop-step-details" id="sd-da-8">
-              <div class="step-detail-item"><strong>UPGRADE:</strong> <code>pac solution import --import-as-holding</code> + <code>pac solution upgrade --async</code>.</div>
-              <div class="step-detail-item"><strong>INSTALL:</strong> <code>pac solution import --force-overwrite</code> (+ optional <code>--settings-file</code> from pre-flight resolved path).</div>
-              <div class="step-detail-item"><strong>skip_import=true</strong> (set by version compare in pre-flight): logs "version already current", skips.</div>
-              <div class="step-detail-item">Mock: logs simulated import with mode and settings file info.</div>
-            </div></div></div>
-            <div class="loop-step"><span class="loop-step-num">9</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-9')">Config data import <span class="step-tag tag-prod">PROD ONLY</span> <span class="step-expand-icon" id="si-da-9">▶</span></div><div class="loop-step-details" id="sd-da-9"><div class="step-detail-item">Only if <code>import_config_data=true</code> AND not skip_import AND <code>config-data/&lt;name&gt;-data.zip</code> exists. <code>pac data import --path config-data/&lt;name&gt;-data.zip --environment &lt;url&gt;</code>.</div></div></div></div>
-            <div class="loop-step"><span class="loop-step-num">10</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-10')">Publish customizations <span class="step-expand-icon" id="si-da-10">▶</span></div><div class="loop-step-details" id="sd-da-10"><div class="step-detail-item">Skipped if skip_import or UPGRADE mode (upgrade publishes atomically). Real: <code>pac solution publish --environment &lt;url&gt;</code>. Mock: logs simulation.</div></div></div></div>
-            <div class="loop-step"><span class="loop-step-num">11</span><div class="loop-step-content"><div class="loop-step-name" onclick="toggleStep('da-11')">Extract + activate flows &amp; workflows <span class="step-expand-icon" id="si-da-11">▶</span></div><div class="loop-step-details" id="sd-da-11">
-              <div class="step-detail-item"><strong>Part A:</strong> <code>Expand-Archive</code> managed ZIP to <code>out/&lt;name&gt;/_extracted/</code>.</div>
-              <div class="step-detail-item"><strong>Part B — Cloud flows (.json):</strong> scans <code>_extracted/Workflows/*.json</code>; extracts flow GUID from filename; calls <code>pac flow enable --flow-id &lt;guid&gt; --environment &lt;url&gt;</code> for each.</div>
-              <div class="step-detail-item"><strong>Part C — Classic workflows (.xaml):</strong> scans <code>_extracted/Workflows/*.xaml</code>; reads workflow <code>Id</code> attribute; acquires bearer token via client_credentials OAuth; calls Dataverse Web API <code>PATCH /api/data/v9.2/workflows(&lt;id&gt;)</code> with <code>{"statecode":1,"statuscode":2}</code>.</div>
-            </div></div></div>
-          </div>
-
-          <div style="padding:6px 12px 0;font-size:11px;font-weight:600;color:#6e7681">POST-DEPLOY</div>
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num">C</span><div class="step-content"><div class="step-name" onclick="toggleStep('da-catch')">Catch — Inline Rollback <span class="step-tag tag-skip">on exception</span> <span class="step-expand-icon" id="si-da-catch">▶</span></div><div class="step-details" id="sd-da-catch"><div class="step-detail-item">Writes <code>SNOW_DEPLOY_STATUS=failure</code> to <code>$GITHUB_ENV</code> (read by SNOW post-deploy step). If <code>enable_backup=true</code> AND backup ZIP exists (upgrades only): <code>pac solution import --path backup/&lt;name&gt;_&lt;env&gt;_backup.zip --force-overwrite</code>. Adds to <code>$failed</code> list. After loop: if <code>$failed.Count &gt; 0</code>, exits 1.</div></div></div></div>
-            <div class="step-item"><span class="step-num">S</span><div class="step-content"><div class="step-name" onclick="toggleStep('da-success')">Write SNOW_DEPLOY_STATUS=success <span class="step-expand-icon" id="si-da-success">▶</span></div><div class="step-details" id="sd-da-success"><div class="step-detail-item">Written to <code>$GITHUB_ENV</code> after loop completes without error. Post-deploy SNOW step reads this to determine whether to close the CR as successful or unsuccessful.</div></div></div></div>
-            <div class="step-item"><span class="step-num">SN</span><div class="step-content"><div class="step-name">ServiceNow Post-Deploy <span class="step-tag tag-snow">if SNOW · always()</span></div><div class="step-ref">→ See ServiceNow CR reference (Steps 12–14)</div></div></div>
-            <div class="step-item"><span class="step-num">BU</span><div class="step-content"><div class="step-name" onclick="toggleStep('da-backup-up')">Upload backup artifact <span class="step-tag tag-skip">if enable_backup</span> <span class="step-expand-icon" id="si-da-backup-up">▶</span></div><div class="step-details" id="sd-da-backup-up"><div class="step-detail-item">Artifact name: <code>backup-&lt;env&gt;-v&lt;run_number&gt;</code>. Path: <code>backup/</code>. Retention: 30 days. Uploaded regardless of deploy outcome for audit purposes.</div></div></div></div>
-          </div>
+  <!-- DEPLOY-ALL-SOLUTIONS -->
+  <div class="wf-card">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">🚀</div><div>
+        <div class="wf-card-title">deploy-all-solutions — Environment Deploy Orchestrator</div>
+        <div class="wf-card-path">GHA-Core/.github/actions/dynamics/deploy-all-solutions/action.yml</div>
+        <div class="wf-card-desc">Main deploy orchestrator. Pre-flight checks → ServiceNow CR → deploy loop → verification → audit log. Steps A–H.</div>
+      </div></div>
+      <div class="wf-toggle">▼</div>
+    </div>
+    <div class="wf-body">
+      <div class="sub-section">
+        <div class="sub-title">Inputs</div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Input</th><th>Default</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td class="key">solutions_json</td><td class="required">required</td><td>JSON array of solution objects</td></tr>
+              <tr><td class="key">environment_name</td><td class="required">required</td><td>Label: Dev, Intg, UAT, FRS, Perf, Prod</td></tr>
+              <tr><td class="key">environment_url</td><td class="required">required</td><td>Target Dataverse environment URL</td></tr>
+              <tr><td class="key">solution_type</td><td>Managed</td><td>Unmanaged (Dev) or Managed (all others)</td></tr>
+              <tr><td class="key">enable_backup</td><td>false</td><td>Export backup before import (enables inline auto-rollback). Driven by <code>ENABLE_ROLLBACK</code> GitHub Environment variable — the caller passes <code>vars.ENABLE_ROLLBACK == 'true'</code>.</td></tr>
+              <tr><td class="key">enable_blocking_check</td><td>false</td><td>Run async blocking operation check before import</td></tr>
+              <tr><td class="key">enable_version_compare</td><td>false</td><td>Skip import when installed version &ge; artifact version</td></tr>
+              <tr><td class="key">import_config_data</td><td>false</td><td>Import configuration migration data (Prod only)</td></tr>
+              <tr><td class="key">previous_environment_url</td><td>""</td><td>Prior environment URL — used by version compare to validate promotion chain</td></tr>
+              <tr><td class="key">tag_prod_deployed</td><td>false</td><td>Tag JFrog artifact as prodDeployed=true (Prod only)</td></tr>
+              <tr><td class="key">activate_flows</td><td>true</td><td>Activate Cloud Flows and Classic Workflows after import</td></tr>
+              <tr><td class="key">mock_deploy</td><td>false</td><td>Simulate all steps — no Dataverse or JFrog calls</td></tr>
+              <tr><td class="key">enable_servicenow</td><td>false</td><td>Open/close ServiceNow change request around the deploy</td></tr>
+              <tr><td class="key">base_solutions</td><td>""</td><td>Prerequisite solution names to verify before deploying</td></tr>
+              <tr><td class="key">jfrog_url / jfrog_repo</td><td>—</td><td>JFrog connection details for artifact tagging</td></tr>
+              <tr><td class="key">run_number / run_attempt</td><td>—</td><td>Pipeline run context for summaries and audit log</td></tr>
+              <tr><td class="key">solution_list</td><td>—</td><td>Display-friendly comma-separated solution names</td></tr>
+              <tr><td class="key">sarif_path</td><td>—</td><td>Path to Solution Checker SARIF report — attached to ServiceNow CR</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
-
-      <!-- ServiceNow -->
-      <div class="shared-card">
-        <div class="shared-card-header" onclick="toggleShared('snow')">
-          <div>
-            <div class="shared-card-title">❄️ ServiceNow CR Lifecycle</div>
-            <div class="shared-card-path">.github/actions/dynamics/servicenow-change/action.yml · Called by deploy-all-solutions when SNOW enabled</div>
-          </div>
-          <span class="shared-toggle" id="st-snow">▼</span>
-        </div>
-        <div class="shared-body" id="sb-snow">
-          <div class="job-purpose" style="padding:8px 14px">Called twice: pre-deploy (8 steps, blocks until approved) + post-deploy (3 steps, <code>if: always()</code>). Credentials: <code>SERVICENOWMURI</code>, <code>SNOW_OAUTH_CLIENT_ID/SECRET</code> set by Reveille when <code>servicenow_enabled=true</code>.</div>
-
-          <div style="padding:6px 12px 0;font-size:11px;font-weight:600;color:#c084fc">PRE-DEPLOY (8 steps — pipeline blocked until approved)</div>
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num">SN1</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-1')">Load ServiceNow PS module <span class="step-expand-icon" id="si-sn-1">▶</span></div><div class="step-details" id="sd-sn-1"><div class="step-detail-item"><code>Import-Module .ci/.github/servicenow/ServiceNow.psd1</code> — makes all SNOW cmdlets available for subsequent steps.</div></div></div></div>
-            <div class="step-item"><span class="step-num">SN2</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-2')">Set runtime environment variables <span class="step-expand-icon" id="si-sn-2">▶</span></div><div class="step-details" id="sd-sn-2"><div class="step-detail-item">Sets <code>BUILD_UNIQUE_IDENTIFIER = &lt;repo&gt;-&lt;run_number&gt;-&lt;environment&gt;</code>. Sets <code>SERVICENOWSHORTDESCRIPTION = Deploy &lt;solutions&gt; to &lt;env&gt; — run #N</code>. Calculates change window from <code>SERVICENOW_DESIRED_DAY</code> variable. Writes all to <code>$GITHUB_ENV</code>.</div></div></div></div>
-            <div class="step-item"><span class="step-num">SN3</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-3')">New-ServiceNowChangeRequest <span class="step-expand-icon" id="si-sn-3">▶</span></div><div class="step-details" id="sd-sn-3"><div class="step-detail-item">Creates CR in ServiceNow. Populates fields from env vars: <code>SERVICENOWCHANGETYPE</code>, <code>SERVICENOWASSIGNMENTGROUP</code>, <code>SERVICENOWJUSTIFICATION</code>, <code>SERVICENOWIMPLEMENTATIONPLAN</code>, <code>SERVICENOWBACKOUTPLAN</code>, <code>SERVICENOWRISKLEVEL</code>, <code>SERVICENOWIMPACTLEVEL</code>, etc.</div><div class="step-detail-item">Writes <code>SNOW_CHANGE_REQUEST_NUMBER</code> (e.g. <code>CHG0123456</code>) and <code>SNOW_CHANGE_REQUEST_ID</code> (sys_id GUID) to <code>$GITHUB_ENV</code>.</div></div></div></div>
-            <div class="step-item"><span class="step-num">SN4</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-4')">Add-ServiceNowAuditTrailArtifact <span class="step-expand-icon" id="si-sn-4">▶</span></div><div class="step-details" id="sd-sn-4"><div class="step-detail-item">Attaches Solution Checker SARIF file to the CR as an audit trail artifact. Only runs if <code>sarif_path</code> input is non-empty. Satisfies audit evidence requirements.</div></div></div></div>
-            <div class="step-item"><span class="step-num">SN5</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-5')">Set-ServiceNowChangeWindow <span class="step-expand-icon" id="si-sn-5">▶</span></div><div class="step-details" id="sd-sn-5"><div class="step-detail-item">Sets planned start/end time on the CR using the calculated change window. Satisfies ITSM governance requirements for scheduled change windows.</div></div></div></div>
-            <div class="step-item"><span class="step-num">SN6</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-6')">Get-ServiceNowConflict <span class="step-expand-icon" id="si-sn-6">▶</span></div><div class="step-details" id="sd-sn-6"><div class="step-detail-item">Queries ServiceNow for scheduling conflicts with the planned change window. Logs conflicts as warnings — does not block (conflict handling is a business process decision).</div></div></div></div>
-            <div class="step-item"><span class="step-num">SN7</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-7')">Request-ServiceNowApproval <span class="step-expand-icon" id="si-sn-7">▶</span></div><div class="step-details" id="sd-sn-7"><div class="step-detail-item">Moves CR from <code>New</code> → <code>Awaiting Approval</code>. Triggers notification to approvers in ServiceNow.</div></div></div></div>
-            <div class="step-item"><span class="step-num">SN8</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-8')">Get-ServiceNowApprovalStatus <span class="step-tag tag-snow">BLOCKS pipeline</span> <span class="step-expand-icon" id="si-sn-8">▶</span></div><div class="step-details" id="sd-sn-8">
-              <div class="step-detail-item"><em>Polls ServiceNow on a configurable interval</em> until CR is approved, rejected, or timed out. Interval and timeout controlled by <code>SERVICENOW_APPROVAL_TIMEOUT_MINUTES</code>.</div>
-              <div class="step-detail-item"><strong>Approved:</strong> logs approval, writes approver info to env, pipeline continues.</div>
-              <div class="step-detail-item"><strong>Rejected:</strong> writes <code>SNOW_DEPLOY_STATUS=rejected</code> to <code>$GITHUB_ENV</code>, fails the step, blocks the deploy.</div>
-              <div class="step-detail-item"><strong>Timeout:</strong> fails the step after the configured timeout.</div>
-            </div></div></div>
-          </div>
-
-          <div style="padding:6px 12px 0;font-size:11px;font-weight:600;color:#56d364">POST-DEPLOY (3 steps — if: always())</div>
-          <div class="steps-list">
-            <div class="step-item"><span class="step-num">SN12</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-12')">Find GitHub Environment approvers <span class="step-expand-icon" id="si-sn-12">▶</span></div><div class="step-details" id="sd-sn-12"><div class="step-detail-item">GitHub Actions REST API: <code>GET /repos/{owner}/{repo}/actions/runs/{run_id}/approvals</code>. Reads list of users who approved the GitHub Environment gate. Falls back to <code>GITHUB_ACTOR</code> if no approvals found.</div></div></div></div>
-            <div class="step-item"><span class="step-num">SN13</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-13')">Read SNOW_DEPLOY_STATUS <span class="step-expand-icon" id="si-sn-13">▶</span></div><div class="step-details" id="sd-sn-13"><div class="step-detail-item">Reads <code>SNOW_DEPLOY_STATUS</code> from <code>$GITHUB_ENV</code>. This variable was written <em>before any <code>exit 1</code></em> in the deploy loop — always reflects the true deploy outcome. Value: <code>success</code>, <code>failure</code>, or <code>rejected</code>.</div></div></div></div>
-            <div class="step-item"><span class="step-num">SN14</span><div class="step-content"><div class="step-name" onclick="toggleStep('sn-14')">Close-ServiceNowChangeRequest <span class="step-expand-icon" id="si-sn-14">▶</span></div><div class="step-details" id="sd-sn-14"><div class="step-detail-item"><code>Close-ServiceNowChangeRequest</code> with: <code>close_code: successful</code> (if status=success) or <code>unsuccessful</code> (if failure/rejected). Passes CR number, sys_id, and approver info. Moves CR to <code>Closed</code> state in ServiceNow with appropriate close notes.</div></div></div></div>
-          </div>
-        </div>
-      </div>
-
     </div>
   </div>
 
+  <!-- OTHER ACTIONS -->
+  <div class="wf-card">
+    <div class="wf-card-hdr" onclick="tog(this)">
+      <div class="wf-card-left"><div class="wf-card-emoji">🔩</div><div><div class="wf-card-title">All Composite Actions (summary)</div><div class="wf-card-desc">Supporting actions used inside build and deploy orchestration</div></div></div>
+      <div class="wf-toggle">▼</div>
+    </div>
+    <div class="wf-body">
+      <div class="tbl-wrap" style="padding:12px 16px">
+        <table>
+          <thead><tr><th>Action</th><th>Location</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td class="key">pac-install</td><td><code>dynamics/pac-install</code></td><td>Installs the Microsoft Power Platform CLI (PAC CLI) on the runner.</td></tr>
+            <tr><td class="key">pack-solution</td><td><code>dynamics/pack-solution</code></td><td>Stamps version number and packs both managed and unmanaged ZIPs via PAC CLI.</td></tr>
+            <tr><td class="key">solution-checker</td><td><code>dynamics/solution-checker</code></td><td>Runs Solution Checker against the managed ZIP. Produces a SARIF report. Always on — cannot be disabled.</td></tr>
+            <tr><td class="key">export-solution</td><td><code>dynamics/export-solution</code></td><td>Exports unmanaged ZIP from a Dataverse environment and unpacks to source files.</td></tr>
+            <tr><td class="key">import-solution</td><td><code>dynamics/import-solution</code></td><td>Imports a solution ZIP into a Dataverse environment.</td></tr>
+            <tr><td class="key">verify-deployment</td><td><code>dynamics/verify-deployment</code></td><td>Post-deploy: queries Dataverse to confirm solution is at expected version.</td></tr>
+            <tr><td class="key">servicenow-change</td><td><code>dynamics/servicenow-change</code></td><td>Creates/closes ServiceNow Change Requests. OAuth token exchange, CR creation, approval polling, closure with SARIF attachment.</td></tr>
+            <tr><td class="key">jfrog-upload</td><td><code>dynamics/jfrog-upload</code></td><td>Uploads solution ZIPs to JFrog Artifactory with metadata properties.</td></tr>
+            <tr><td class="key">post-deploy</td><td><code>dynamics/post-deploy</code></td><td>Post-deploy cleanup: activate flows, publish, write deploy summary card.</td></tr>
+            <tr><td class="key">export-config-data</td><td><code>dynamics/export-config-data</code></td><td>Exports configuration migration data using the data schema XML file.</td></tr>
+            <tr><td class="key">pre-deploy-checks</td><td><code>dynamics/pre-deploy-checks</code></td><td>Informational pre-flight checks: base solution check, blocking check, version compare. <strong>Never blocks the pipeline</strong> — all results are warnings. <code>skip_import</code> output is always <code>false</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- VARIABLE PRECEDENCE                          -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="var-precedence">
+  <div class="section-title">📊 Variable Precedence — Which Value Wins?</div>
+  <div class="section-sub">Variables can be set at multiple levels. The highest-priority level always wins. Think of it as a layered override system — each layer adds or overrides the one below it.</div>
+
+  <div class="callout">
+    <strong>The Golden Rule:</strong> Values flow upward from GHA-Core (base defaults) through to Azure Key Vault (highest priority). A variable set at a higher layer always overrides the same variable at a lower layer. Exception: protected keys are <em>locked at layer 1</em> and cannot be overridden by anyone.
+  </div>
+
+  <div class="prec-stack">
+    <div class="prec-layer">
+      <div class="prec-arrow-col"></div>
+      <div class="prec-bar prec-l5">
+        <div class="prec-num">5 — WINS</div>
+        <div style="flex:1"><div class="prec-name">Azure Key Vault Secrets</div><div class="prec-desc">PP credentials, JFrog key, ServiceNow creds. Fetched at runtime via OIDC. Masked immediately. Stored nowhere in GitHub.</div></div>
+        <div class="prec-wins">🔐 Runtime</div>
+      </div>
+    </div>
+    <div class="prec-layer">
+      <div class="prec-arrow-col">↑</div>
+      <div class="prec-bar prec-l4">
+        <div class="prec-num">4</div>
+        <div style="flex:1"><div class="prec-name">GitHub Environment Variables</div><div class="prec-desc">Settings → Environments → {Env} → Variables. Override repo-level for specific environments. Used for per-environment OIDC identity (AZURE_CLIENT_ID, AZURE_KEY_VAULT_NAME) and SERVICENOW_ENABLED.</div></div>
+        <div class="prec-wins">🌍 Per-Env</div>
+      </div>
+    </div>
+    <div class="prec-layer">
+      <div class="prec-arrow-col">↑</div>
+      <div class="prec-bar prec-l3">
+        <div class="prec-num">3</div>
+        <div style="flex:1"><div class="prec-name">GitHub Repository Variables</div><div class="prec-desc">Settings → Secrets and variables → Variables. URLs (PP_DEV_URL etc.), AZURE_CLIENT_ID, JFROG_URL, feature toggles. Read via <code>vars.*</code> in workflows.</div></div>
+        <div class="prec-wins">🐙 Repo</div>
+      </div>
+    </div>
+    <div class="prec-layer">
+      <div class="prec-arrow-col">↑</div>
+      <div class="prec-bar prec-l2">
+        <div class="prec-num">2</div>
+        <div style="flex:1"><div class="prec-name">project-vars.yml (GHA-Dynamics)</div><div class="prec-desc">Source-controlled project overrides. PP URLs, solution names, JFrog URL, timeout overrides. Cannot override protected keys. Merged by Merge-Variables.ps1.</div></div>
+        <div class="prec-wins">📁 Project</div>
+      </div>
+    </div>
+    <div class="prec-layer">
+      <div class="prec-arrow-col">↑</div>
+      <div class="prec-bar prec-l1">
+        <div class="prec-num">1 — BASE</div>
+        <div style="flex:1"><div class="prec-name">global-vars.yml (GHA-Core)</div><div class="prec-desc">Org-wide defaults and protected keys. PP_CHECKER_GEO, PP_CHECKER_ERROR_LEVEL, DEFAULT_SOLUTION_TYPE, ENABLE_BACKUP, ENABLE_ROLLBACK. <strong>Protected keys cannot be overridden by any higher layer.</strong></div></div>
+        <div class="prec-wins">🌐 Global</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout warn" style="margin-top:12px">
+    <strong>🔒 Protected Keys (locked at layer 1 — cannot be overridden by any project):</strong><br>
+    <code>PP_CHECKER_GEO</code> · <code>PP_CHECKER_ERROR_LEVEL</code> · <code>DEFAULT_SOLUTION_TYPE</code> · <code>ENABLE_BACKUP</code> · <code>ENABLE_ROLLBACK</code><br><br>
+    If <code>project-vars.yml</code> contains any of these, <code>Merge-Variables.ps1</code> exits with error code 1 and the pipeline fails immediately. The <code>_reusable-lint.yml</code> workflow also catches this before the pipeline starts.
+  </div>
+
+  <div class="callout">
+    <strong>Azure Identity Keys are intentionally excluded from the merge:</strong> <code>AZURE_CLIENT_ID</code>, <code>AZURE_TENANT_ID</code>, <code>AZURE_SUBSCRIPTION_ID</code>, <code>AZURE_KEY_VAULT_NAME</code> are passed directly as workflow inputs from <code>vars.*</code> — they bypass the variable merge entirely. This prevents OIDC hijacking: a compromised project-vars.yml cannot redirect authentication to a different Azure tenant.
+  </div>
+
+  <h3 style="color:#c9d1d9;font-size:13px;margin:20px 0 10px">Precedence in practice — example</h3>
+  <div class="flow-diagram">
+    <pre>
+  Variable: <span class="hi-cyan">SOLUTION_IMPORT_MAX_WAIT_MINUTES</span>
+
+  Layer 1 global-vars.yml    : 60      (base default)
+  Layer 2 project-vars.yml   : 90      (project override — larger solutions need more time)
+  Layer 3 GitHub repo vars   : (not set)
+  Layer 4 GitHub env vars    : (not set)
+  Layer 5 AKV               : (not a secret — not applicable)
+
+  ► Effective value: <span class="hi-green">90</span>  (project-vars.yml wins over global default)
+
+  ─────────────────────────────────────────────────────
+
+  Variable: <span class="hi-cyan">PP_CHECKER_GEO</span>
+
+  Layer 1 global-vars.yml    : "UnitedStates"  (PROTECTED)
+  Layer 2 project-vars.yml   : "Europe"        ← ERROR: Merge-Variables.ps1 exits 1
+  Layer 3–5                  : (irrelevant — merge fails immediately)
+
+  ► Pipeline FAILS with: "Cannot override protected key PP_CHECKER_GEO"
+    </pre>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- GLOBAL VARS                                  -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="global-vars">
+  <div class="section-title">🌐 Global Variables — global-vars.yml</div>
+  <div class="section-sub">
+    <strong>File:</strong> <code>GHA-Core/.github/variables/dynamics/global-vars.yml</code><br>
+    Org-wide defaults. Apply to every project consuming GHA-Core. Protected keys are enforced — projects cannot override them.
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Variable</th><th>Default Value</th><th>Protected?</th><th>Description &amp; Rationale</th></tr></thead>
+      <tbody>
+        <tr><td class="key protect">PP_CHECKER_GEO</td><td class="default">UnitedStates</td><td class="protect">🔒 Yes</td><td>Solution Checker geography. Org-wide consistency — all solutions scanned against same regional ruleset.</td></tr>
+        <tr><td class="key protect">PP_CHECKER_ERROR_LEVEL</td><td class="default">HighIssue</td><td class="protect">🔒 Yes</td><td>Minimum issue severity that fails the build. Projects cannot lower the quality bar below HighIssue.</td></tr>
+        <tr><td class="key protect">DEFAULT_SOLUTION_TYPE</td><td class="default">managed</td><td class="protect">🔒 Yes</td><td>All solutions deploy as Managed to upper environments. Projects cannot deploy unmanaged above Dev.</td></tr>
+        <tr><td class="key protect">ENABLE_BACKUP</td><td class="default">—</td><td class="protect">🔒 Yes</td><td>Protected to prevent project-vars.yml from setting a global backup flag. Rollback is controlled per-environment via <code>ENABLE_ROLLBACK</code> GitHub Environment variable, not via global-vars.yml.</td></tr>
+        <tr><td class="key protect">ENABLE_ROLLBACK</td><td class="default">—</td><td class="protect">🔒 Yes</td><td>Protected to prevent project-vars.yml from overriding per-environment rollback settings. Set <code>ENABLE_ROLLBACK=true</code> on individual GitHub Environments (Dev/Intg/UAT/FRS/Perf/Prod) in Settings → Environments to enable auto-backup + auto-restore on import failure for that environment.</td></tr>
+        <tr><td class="key">JFROG_REPO</td><td class="default">powerplatform-solutions</td><td class="no">No</td><td>Default JFrog repo name. Projects can override in project-vars.yml.</td></tr>
+        <tr><td class="key">ENABLE_BLOCKING_CHECK</td><td class="default">true</td><td class="no">No</td><td>Run async blocking operation check before import. Projects can set false if needed.</td></tr>
+        <tr><td class="key">MOCK_DEPLOY</td><td class="default">false</td><td class="no">No</td><td>Global mock mode flag. Normally set via workflow_dispatch input — this global rarely changes.</td></tr>
+        <tr><td class="key">SOLUTION_IMPORT_MAX_WAIT_MINUTES</td><td class="default">60</td><td class="no">No</td><td>Max wait for async solution import to complete. Projects with large solutions can increase.</td></tr>
+        <tr><td class="key">SOLUTION_CHECKER_TIMEOUT_MINUTES</td><td class="default">10</td><td class="no">No</td><td>Max wait for Solution Checker to finish its analysis.</td></tr>
+        <tr><td class="key">JFROG_UPLOAD_ENABLED</td><td class="default">true</td><td class="no">No</td><td>Enable JFrog upload after build. Set false to skip archival (e.g., for prototype projects).</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- PROJECT VARS                                 -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="project-vars">
+  <div class="section-title">📁 Project Variables — project-vars.yml</div>
+  <div class="section-sub">
+    <strong>File:</strong> <code>GHA-Dynamics/.github/config/project-vars.yml</code><br>
+    Project-specific overrides. Source-controlled — visible to all repo contributors. <strong>Never put secrets here.</strong>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Variable</th><th>Example Value</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td class="key">PP_DEV_URL</td><td><code>https://cicd-dev.crm.dynamics.com</code></td><td>Power Platform Dev environment URL</td></tr>
+        <tr><td class="key">PP_INTG_URL</td><td><code>https://cicd-intg.crm.dynamics.com</code></td><td>Integration environment URL</td></tr>
+        <tr><td class="key">PP_UAT_URL</td><td><code>https://cicd-uat.crm.dynamics.com</code></td><td>UAT environment URL</td></tr>
+        <tr><td class="key">PP_FRS_URL</td><td><code>https://cicd-frs.crm.dynamics.com</code></td><td>Full regression suite environment URL</td></tr>
+        <tr><td class="key">PP_PERF_URL</td><td><code>https://cicd-perf.crm.dynamics.com</code></td><td>Performance testing environment URL</td></tr>
+        <tr><td class="key">PP_PROD_URL</td><td><code>https://cicd-prod.crm.dynamics.com</code></td><td>Production environment URL</td></tr>
+        <tr><td class="key">PP_SDBX_URL</td><td><code>https://cicddev.crm.dynamics.com</code></td><td>Sandbox (developer) environment URL for export</td></tr>
+        <tr><td class="key">PP_SOLUTION_NAME</td><td><code>YourSolutionName</code></td><td>Default solution name for single-solution repos. Used when "all" is selected and solutions.json has one entry.</td></tr>
+        <tr><td class="key">PP_DATA_SCHEMA_FILE</td><td><code>src/solutions/{Name}/config-data-schema.xml</code></td><td>Path to config migration data schema XML (co-located with solution source). Leave blank to skip config data export/import. Convention: one file per solution inside its <code>src/solutions/{Name}/</code> folder.</td></tr>
+        <tr><td class="key">PP_BASE_SOLUTIONS</td><td><code>"nfBase,nfShared"</code></td><td>Comma-separated prerequisite solution names to verify before deployment. Leave empty to skip.</td></tr>
+        <tr><td class="key">JFROG_URL</td><td><code>https://company.jfrog.io/artifactory</code></td><td>JFrog Artifactory base URL for this project</td></tr>
+        <tr><td class="key">SOLUTION_IMPORT_MAX_WAIT_MINUTES</td><td><code>90</code></td><td>Optional: increase from the global default (60) for large solutions</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <strong>Never put in project-vars.yml:</strong> passwords, API keys, client secrets, connection strings, tokens. This file is in source control and visible to all contributors. Secrets belong exclusively in Azure Key Vault.
+  </div>
+
+  <div class="callout">
+    <strong>AZURE_* identity values do NOT belong here either.</strong> They are non-sensitive resource identifiers but must be set as GitHub Repository Variables (Settings → Variables) so they can be overridden at the GitHub Environment level for per-environment OIDC isolation.
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- GITHUB VARIABLES                             -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="github-vars">
+  <div class="section-title">🐙 GitHub Variables &amp; Secrets</div>
+  <div class="section-sub">Set in <strong>Settings → Secrets and variables → Actions</strong>. Repository-level variables apply everywhere. Environment-level variables (Settings → Environments → {Env} → Variables) override repo-level for that specific environment.</div>
+
+  <h3 style="color:#c9d1d9;font-size:12px;margin:0 0 10px">Repository Variables — required</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Variable</th><th>Required?</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td class="key">AZURE_CLIENT_ID</td><td class="required">Required</td><td>App Registration Client ID used for OIDC login. This is the service principal that accesses the Key Vault.</td></tr>
+        <tr><td class="key">AZURE_TENANT_ID</td><td class="required">Required</td><td>Azure AD Tenant ID</td></tr>
+        <tr><td class="key">AZURE_SUBSCRIPTION_ID</td><td class="required">Required</td><td>Azure Subscription ID</td></tr>
+        <tr><td class="key">AZURE_KEY_VAULT_NAME</td><td class="required">Required</td><td>Azure Key Vault name where PP credentials are stored</td></tr>
+        <tr><td class="key">PP_DEV_URL … PP_PROD_URL</td><td class="required">Required</td><td>Power Platform environment URLs. Can also be set in project-vars.yml — GitHub Variables take precedence.</td></tr>
+        <tr><td class="key">PP_SDBX_URL</td><td class="required">Required</td><td>Sandbox environment URL for the export workflow</td></tr>
+        <tr><td class="key">JFROG_URL</td><td>Optional</td><td>JFrog Artifactory URL. Leave blank/unset to skip JFrog upload entirely.</td></tr>
+        <tr><td class="key">JFROG_REPO</td><td>Optional</td><td>JFrog repo name. Defaults to <code>powerplatform-solutions</code> from global-vars.yml.</td></tr>
+        <tr><td class="key">PP_SOLUTION_NAME</td><td>Optional</td><td>Default solution for single-solution repos</td></tr>
+        <tr><td class="key">PP_BASE_SOLUTIONS</td><td>Optional</td><td>Comma-separated prerequisite solution names</td></tr>
+        <tr><td class="key">SKIP_UAT</td><td>Optional</td><td>⚠️ Break-glass only. Set to <code>true</code> to bypass UAT re-validation in Pipeline 2 on auto-triggered (push) runs where no dispatch input can be provided. Unset immediately after the emergency deployment.</td></tr>
+        <tr><td class="key">SERVICENOW_ENABLED</td><td>Optional</td><td>Set to <code>true</code> on a GitHub Environment to enable ServiceNow CR for that environment's deploys.</td></tr>
+        <tr><td class="key">MULESOFT_ENABLED</td><td>Optional</td><td>Set to <code>true</code> to fetch MuleSoft credentials from Key Vault</td></tr>
+        <tr><td class="key">MAIL_SERVER, MAIL_PORT, MAIL_USERNAME</td><td>Optional</td><td>SMTP settings for failure notification emails</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 style="color:#c9d1d9;font-size:12px;margin:20px 0 10px">Environment-level Variable Overrides (for per-env OIDC isolation)</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Variable</th><th>Set on environments</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="key">AZURE_CLIENT_ID</td><td>Each environment (Dev, Intg, UAT…)</td><td>Each environment can use a different App Registration, giving complete OIDC isolation. Recommended pattern: one SPN for non-prod (Dev/Intg/UAT/FRS/Perf), a separate SPN for Prod.</td></tr>
+        <tr><td class="key">AZURE_KEY_VAULT_NAME</td><td>Each environment</td><td>Different Key Vault per environment boundary. Credentials in the non-prod vault cannot access Prod resources.</td></tr>
+        <tr><td class="key">ENABLE_ROLLBACK</td><td>Any environment (Dev, Intg, UAT, FRS, Perf, Prod)</td><td>Set to <code>true</code> on any GitHub Environment to enable auto-backup before import + auto-restore on import failure. This is the only supported way to configure rollback — there is no dispatch input for this.</td></tr>
+        <tr><td class="key">SERVICENOW_ENABLED</td><td>UAT, Prod (typically)</td><td>Enable ServiceNow CR lifecycle for specific environments only</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 style="color:#c9d1d9;font-size:12px;margin:20px 0 10px">GitHub Secrets (not Variables)</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Secret</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td class="key">GHA_CORE_PAT</td><td>Personal Access Token for checking out the private GHA-Core repository. Needs <code>repo:read</code> scope on the GHA-Core repo. Required on all jobs that check out GHA-Core.</td></tr>
+        <tr><td class="key">GITHUB_TOKEN</td><td>Built-in GitHub token — automatically available in every workflow. Used for downloading artifacts between jobs and creating PRs. No configuration needed.</td></tr>
+        <tr><td class="key">MAIL_PASSWORD</td><td>SMTP password for failure notification emails. If not set, the email step silently skips.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ════════════════════════════════════════════ -->
+<!-- AKV SECRETS                                  -->
+<!-- ════════════════════════════════════════════ -->
+<div class="section" id="akv-secrets">
+  <div class="section-title">🔐 Azure Key Vault Secrets</div>
+  <div class="section-sub">
+    Stored in your project's Azure Key Vault. Fetched at runtime by the <strong>reveille</strong> action via OIDC. Never stored in GitHub. Each secret is masked with <code>::add-mask::</code> immediately upon retrieval — it will never appear in logs.
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>AKV Secret Name</th><th>Env Variable Written</th><th>Fetched When</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td class="key">pp-app-id</td><td><code>PP_APP_ID</code></td><td>Always (non-mock)</td><td>Power Platform service principal Application (Client) ID</td></tr>
+        <tr><td class="key">pp-client-secret</td><td><code>PP_CLIENT_SECRET</code></td><td>Always (non-mock)</td><td>Power Platform service principal client secret 🔐</td></tr>
+        <tr><td class="key">pp-tenant-id</td><td><code>PP_TENANT_ID</code></td><td>Always (non-mock)</td><td>Azure AD Tenant ID for Power Platform auth (may differ from the OIDC tenant)</td></tr>
+        <tr><td class="key">jfrog-api-key</td><td><code>JFROG_API_KEY</code></td><td>jfrog_enabled=true</td><td>JFrog Artifactory API key for uploading and tagging artifacts</td></tr>
+        <tr><td class="key">snow-base-uri</td><td><code>SERVICENOWMURI</code></td><td>servicenow_enabled=true</td><td>ServiceNow instance base URL</td></tr>
+        <tr><td class="key">snow-oauth-client-id</td><td><code>SNOW_OAUTH_CLIENT_ID</code></td><td>servicenow_enabled=true</td><td>ServiceNow OAuth application client ID</td></tr>
+        <tr><td class="key">snow-oauth-client-secret</td><td><code>SNOW_OAUTH_CLIENT_SECRET</code></td><td>servicenow_enabled=true</td><td>ServiceNow OAuth client secret 🔐</td></tr>
+        <tr><td class="key">mulesoft-client-id</td><td><code>MULESOFT_CLIENT_ID</code></td><td>mulesoft_enabled=true</td><td>MuleSoft API client ID</td></tr>
+        <tr><td class="key">mulesoft-client-secret</td><td><code>MULESOFT_CLIENT_SECRET</code></td><td>mulesoft_enabled=true</td><td>MuleSoft API client secret 🔐</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout success">
+    <strong>✅ Why Key Vault instead of GitHub Secrets for PP credentials?</strong> GitHub Secrets are scoped to one repo and require manual rotation with GitHub UI access. Azure Key Vault secrets: rotate independently of GitHub (no PR, no deploy needed), have their own audit log in Azure Monitor, can be scoped per environment (non-prod KV vs prod KV), and are fetched via OIDC — meaning zero stored passwords are needed to access the vault itself.
+  </div>
+
+  <div class="callout warn">
+    <strong>⚠️ OIDC Federated Credential Setup:</strong> For each GitHub Environment that runs deploys (Dev, Intg, UAT, FRS, Perf, Prod), the App Registration must have a federated credential with:<br>
+    • Issuer: <code>https://token.actions.githubusercontent.com</code><br>
+    • Subject: <code>repo:ppudot2-cloud/GHA-Dynamics:environment:{EnvName}</code><br>
+    Without this, Azure login fails with AADSTS70021 ("No matching federated identity record"). See <a href="OIDC_SETUP.md">OIDC_SETUP.md</a> for the full setup guide.
+  </div>
 </div>
 
 <div class="footer">
-  GHA-Core + GHA-Dynamics · Generated from live YAML sources · <a href="PIPELINE_WALKTHROUGH.md">Full Markdown Reference →</a>
+  Last updated May 2026 · <a href="PIPELINE_REFERENCE.md">Pipeline Reference</a> · <a href="OIDC_SETUP.md">OIDC Setup</a> · <a href="QUICK_START.md">Quick Start</a> · <a href="RUNBOOKS.md">Runbooks</a>
 </div>
 
+</div><!-- /content -->
+</main>
+
 <script>
-function toggleCard(id) {
-  const body = document.getElementById('body-' + id);
-  const toggle = document.getElementById('toggle-' + id);
-  const isOpen = body.classList.contains('open');
-  body.classList.toggle('open', !isOpen);
-  toggle.classList.toggle('open', !isOpen);
+function tog(hdr) {
+  const card = hdr.parentElement;
+  const body = card.querySelector('.wf-body, .job-body');
+  const arrow = hdr.querySelector('.wf-toggle, .job-toggle');
+  if (!body) return;
+  const open = body.classList.toggle('open');
+  if (arrow) arrow.classList.toggle('open', open);
 }
 
-function toggleStep(id) {
-  const det = document.getElementById('sd-' + id);
-  const icon = document.getElementById('si-' + id);
-  if (!det) return;
-  const isOpen = det.classList.contains('open');
-  det.classList.toggle('open', !isOpen);
-  if (icon) icon.classList.toggle('open', !isOpen);
+function goTo(id, el) {
+  const target = document.getElementById(id);
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) el.classList.add('active');
 }
 
-function toggleShared(id) {
-  const body = document.getElementById('sb-' + id);
-  const toggle = document.getElementById('st-' + id);
-  const isOpen = body.classList.contains('open');
-  body.classList.toggle('open', !isOpen);
-  toggle.classList.toggle('open', !isOpen);
-}
-
-function expandAll() {
-  document.querySelectorAll('.job-body').forEach(el => el.classList.add('open'));
-  document.querySelectorAll('.job-toggle').forEach(el => el.classList.add('open'));
-  document.querySelectorAll('.shared-body').forEach(el => el.classList.add('open'));
-  document.querySelectorAll('.shared-toggle').forEach(el => el.classList.add('open'));
-  document.querySelectorAll('.step-details, .loop-step-details').forEach(el => el.classList.add('open'));
-  document.querySelectorAll('.step-expand-icon').forEach(el => el.classList.add('open'));
-}
-
-function collapseAll() {
-  document.querySelectorAll('.job-body').forEach(el => el.classList.remove('open'));
-  document.querySelectorAll('.job-toggle').forEach(el => el.classList.remove('open'));
-  document.querySelectorAll('.shared-body').forEach(el => el.classList.remove('open'));
-  document.querySelectorAll('.shared-toggle').forEach(el => el.classList.remove('open'));
-  document.querySelectorAll('.step-details, .loop-step-details').forEach(el => el.classList.remove('open'));
-  document.querySelectorAll('.step-expand-icon').forEach(el => el.classList.remove('open'));
-}
+// Scrollspy
+const ms = document.getElementById('mainScroll');
+const secs = Array.from(document.querySelectorAll('.section[id]'));
+ms.addEventListener('scroll', () => {
+  const scrollTop = ms.scrollTop + 80;
+  let current = secs[0]?.id;
+  for (const s of secs) { if (s.offsetTop <= scrollTop) current = s.id; }
+  document.querySelectorAll('.nav-item').forEach(n => {
+    const fn = n.getAttribute('onclick') || '';
+    n.classList.toggle('active', fn.includes("'" + current + "'"));
+  });
+}, { passive: true });
 </script>
 </body>
 </html>

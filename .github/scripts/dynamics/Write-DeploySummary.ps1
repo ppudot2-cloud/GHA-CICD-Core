@@ -66,7 +66,7 @@ function Get-Icon([string]$outcome) {
 
 @"
 
-## 📊 Deployment Summary — $EnvironmentName
+## 📊 $SolutionName — $EnvironmentName
 | Step | Toggle | Result |
 | --- | --- | --- |
 | Auth (who-am-i) | Always | $(Get-Icon $WhoAmIOutcome) |

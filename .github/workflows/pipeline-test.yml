@@ -1,0 +1,301 @@
+# =============================================================================
+# WORKFLOW: Pipeline Integration Test (Full Mock Run)
+# =============================================================================
+#
+# LOCATION: GHA-Core (this file).
+#
+# WHY IT LIVES IN CORE
+# ─────────────────────────────────────────────────────────────────────────────
+# Pipeline tests are a shared platform capability. This workflow is the single
+# implementation and can be:
+#   A) Called as a reusable workflow from GHA-Dynamics build-and-deploy.yml
+#      (when `run_pipeline_tests: true` input is passed).
+#   B) Triggered standalone from GHA-Core's own Actions tab (for CI on core changes).
+#
+# PURPOSE
+# ─────────────────────────────────────────────────────────────────────────────
+# Verifies the complete pipeline flow end-to-end in mock mode.
+# No Dataverse changes, no Azure login, no JFrog upload.
+# Cost: zero — no real Azure or Dataverse resources consumed.
+#
+# What it validates:
+#   ✅ solutions.json resolves correctly via Resolve-SolutionMatrix.ps1
+#   ✅ GHA-Core _stage-build.yml can be called with current inputs
+#   ✅ Mock build: version stamp, pack, solution checker simulation
+#   ✅ Mock deploy: deploy-all-solutions composite action end-to-end
+#   ✅ All PowerShell scripts (unit tests) pass via Pester
+#
+# USAGE FROM GHA-DYNAMICS
+# ─────────────────────────────────────────────────────────────────────────────
+# In build-and-deploy.yml, pass `run_pipeline_tests: true` as a workflow_dispatch
+# input. The pipeline-tests job conditionally calls this reusable workflow.
+# This is optional and defaults to false to keep normal runs fast.
+#
+# =============================================================================
+
+name: Pipeline Integration Test
+
+on:
+  # ── Reusable: called from GHA-Dynamics build-and-deploy.yml ─────────────────
+  workflow_call:
+    inputs:
+      solutions:
+        description: 'Solutions to test ("all" or comma-separated)'
+        required: false
+        default: 'all'
+        type: string
+      caller_repo:
+        description: 'The GHA-Dynamics repo calling this workflow (org/repo)'
+        required: false
+        default: ''
+        type: string
+
+  # ── Standalone: run from GHA-Core Actions tab ────────────────────────────────
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+      - '.github/scripts/**'
+
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+
+  workflow_dispatch:
+    inputs:
+      solutions:
+        description: 'Solutions to test ("all" or comma-separated)'
+        required: false
+        default: 'all'
+      caller_repo:
+        description: 'Optional: GHA-Dynamics repo to test against (org/repo). Leave blank to use GHA-Core test fixtures.'
+        required: false
+        default: ''
+
+jobs:
+  # ============================================================================
+  # JOB 0 — Setup
+  # ============================================================================
+  setup:
+    name: "🔍 Setup"
+    runs-on: ubuntu-latest
+    outputs:
+      matrix:         ${{ steps.resolve.outputs.matrix }}
+      solution_list:  ${{ steps.resolve.outputs.solution_list }}
+      solution_count: ${{ steps.resolve.outputs.solution_count }}
+
+    steps:
+      - name: Checkout GHA-Core
+        uses: actions/checkout@v4
+        with:
+          path: .ci
+
+      # When called from GHA-Dynamics, also check out the Dynamics repo for solutions.json
+      - name: Checkout caller repo (when specified)
+        if: ${{ inputs.caller_repo != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.caller_repo }}
+          token:      ${{ secrets.GHA_CORE_PAT }}
+          path:       .
+
+      # Fall back to a built-in test solutions.json when running standalone from Core
+      - name: Create test solutions.json (standalone mode)
+        if: ${{ inputs.caller_repo == '' }}
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'solutions.json')) {
+            @{
+              solutions = @(
+                @{
+                  name               = "CoreSolution"
+                  folder             = "src/solutions/CoreSolution"
+                  deployOrder        = 1
+                  dependsOn          = @()
+                  dataSchemaFile     = ""
+                  deploymentSettings = @{
+                    dev  = ""
+                    intg = ""
+                    uat  = ""
+                    frs  = ""
+                    perf = ""
+                    prod = ""
+                  }
+                }
+              )
+            } | ConvertTo-Json -Depth 5 | Out-File 'solutions.json' -Encoding utf8
+            Write-Host "✅ Created minimal test solutions.json for standalone run"
+          } else {
+            Write-Host "✅ Using existing solutions.json"
+          }
+
+      - name: Resolve solution matrix
+        id: resolve
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/dynamics/Resolve-SolutionMatrix.ps1 `
+            -InputSolutions    '${{ inputs.solutions || 'all' }}' `
+            -PpSolutionName    '' `
+            -SolutionsJsonPath 'solutions.json'
+
+  # ============================================================================
+  # JOB 1 — Pester Unit Tests
+  # ============================================================================
+  pester-unit-tests:
+    name: "🧪 Pester Unit Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GHA-Core
+        uses: actions/checkout@v4
+        with:
+          path: .ci
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -MinimumVersion 5.0 -Force -Scope CurrentUser
+          Import-Module Pester
+          Write-Host "Pester version: $((Get-Module Pester).Version)"
+
+      - name: Run Pester — Dynamics scripts
+        shell: pwsh
+        run: |
+          $testDir = '.ci/.github/servicenow/Tests/Unit/Dynamics'
+          if (-not (Test-Path $testDir)) {
+            Write-Host "::warning::No Dynamics Pester tests found at $testDir — skipping."
+            exit 0
+          }
+
+          $config = New-PesterConfiguration
+          $config.Run.Path                = $testDir
+          $config.Output.Verbosity        = 'Detailed'
+          $config.TestResult.Enabled      = $true
+          $config.TestResult.OutputPath   = 'test-results-dynamics.xml'
+          $config.TestResult.OutputFormat = 'JUnitXml'
+
+          $result = Invoke-Pester -Configuration $config
+          if ($result.FailedCount -gt 0) {
+            Write-Host "::error::$($result.FailedCount) Pester test(s) failed."
+            exit 1
+          }
+          Write-Host "✅ All $($result.PassedCount) Pester test(s) passed."
+
+      - name: Upload Pester test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pester-results-run${{ github.run_number }}
+          path: test-results-*.xml
+          retention-days: 30
+
+  # ============================================================================
+  # JOB 2 — Mock Build Stage
+  # ============================================================================
+  mock-build:
+    name: "🔨 Mock Build Stage"
+    needs: setup
+    uses: ppudot2-cloud/GHA-Core/.github/workflows/_stage-build.yml@main
+    with:
+      matrix:                ${{ needs.setup.outputs.matrix }}
+      mock_deploy:           true
+      azure_client_id:       ''
+      azure_tenant_id:       ''
+      azure_subscription_id: ''
+      azure_key_vault_name:  ''
+    secrets: inherit
+
+  # ============================================================================
+  # JOB 3 — Mock Deploy Dev
+  # ============================================================================
+  mock-deploy-dev:
+    name: "🚀 Mock Deploy | Dev"
+    needs: [setup, mock-build]
+    if: needs.mock-build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      actions:  read
+    env:
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+
+    steps:
+      - name: Reveille (mock — skips Azure login and AKV fetch)
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        with:
+          mock_deploy: 'true'
+
+      - name: Install PAC CLI
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+
+      - name: Download solution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern:      solution-artifact-*
+          path:         .
+          merge-multiple: true
+          run-id:       ${{ github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy all solutions → Dev (mock)
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@main
+        with:
+          solutions_json:           ${{ needs.setup.outputs.matrix }}
+          environment_name:         Dev
+          environment_url:          'https://mock-dev.crm.dynamics.com'
+          solution_type:            Unmanaged
+          enable_backup:            false
+          enable_blocking_check:    false
+          enable_version_compare:   false
+          import_config_data:       false
+          previous_environment_url: ''
+          tag_prod_deployed:        false
+          activate_flows:           true
+          mock_deploy:              true
+          base_solutions:           ''
+          jfrog_url:                ''
+          jfrog_repo:               'powerplatform-solutions'
+          run_number:               ${{ github.run_number }}
+          run_attempt:              ${{ github.run_attempt }}
+          enable_servicenow:        false
+          solution_list:            ${{ needs.setup.outputs.solution_list }}
+
+  # ============================================================================
+  # JOB 4 — Test Summary
+  # ============================================================================
+  test-summary:
+    name: "📋 Test Summary"
+    needs: [pester-unit-tests, mock-build, mock-deploy-dev]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write test summary
+        shell: pwsh
+        run: |
+          $pester  = '${{ needs.pester-unit-tests.result }}'
+          $build   = '${{ needs.mock-build.result }}'
+          $deploy  = '${{ needs.mock-deploy-dev.result }}'
+
+          $pass      = @('success', 'skipped')
+          $allPassed = ($pass -contains $pester) -and ($pass -contains $build) -and ($pass -contains $deploy)
+
+          @"
+          ## 🧪 Pipeline Integration Test — Run #${{ github.run_number }}
+
+          | Check | Result |
+          |---|---|
+          | Pester unit tests | $pester |
+          | Mock build stage (_stage-build.yml) | $build |
+          | Mock deploy — Dev (deploy-all-solutions) | $deploy |
+
+          **Overall: $(if ($allPassed) { '✅ PASSED' } else { '❌ FAILED' })**
+
+          > Full 6-environment deploy is validated by the real build-and-deploy.yml
+          > pipeline run with mock_deploy=true (dispatch from UI).
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+          if (-not $allPassed) { exit 1 }

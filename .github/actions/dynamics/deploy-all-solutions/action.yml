@@ -722,10 +722,13 @@ runs:
         $isMock     = '${{ inputs.mock_deploy }}' -eq 'true'
         $matrixJson = '${{ inputs.solutions_json }}'
 
-        # Parse solution list from matrix JSON
+        # Parse solution list from matrix JSON — same logic as the deploy loop
+        # (solutions_json can be a plain array or a GitHub Actions matrix object)
         try {
-          $matrix    = $matrixJson | ConvertFrom-Json
-          $solutions = $matrix.include | ForEach-Object { $_.solution }
+          $parsed    = $matrixJson | ConvertFrom-Json
+          $solObjs   = if ($parsed.solution) { $parsed.solution } else { $parsed }
+          # Extract just the name strings for verification
+          $solutions = @($solObjs | ForEach-Object { if ($_.name) { $_.name } else { [string]$_ } })
         } catch {
           Write-Host "::warning::Could not parse solutions_json — skipping post-deploy verification."
           exit 0

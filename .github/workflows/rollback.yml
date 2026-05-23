@@ -1,0 +1,235 @@
+# =============================================================================
+# WORKFLOW: Manual Rollback — Restore a Previous Solution Version
+# =============================================================================
+#
+# LOCATION: GHA-Core (this file). All rollback logic lives here.
+#
+# WHY IT LIVES IN CORE
+# ─────────────────────────────────────────────────────────────────────────────
+# Rollback is a shared platform capability, not a project-specific workflow.
+# This workflow is the single implementation — any GHA-Dynamics project triggers
+# it directly from GHA-Core's Actions tab.
+#
+# AUTOMATIC ROLLBACK vs MANUAL ROLLBACK
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTOMATIC  : Each GitHub Environment in GHA-Dynamics can set
+#              ENABLE_ROLLBACK=true as an environment variable.
+#              When set, the deploy pipeline takes a pre-import backup
+#              automatically and restores it inline if the import fails.
+#              No human intervention required.
+#
+# MANUAL (THIS WORKFLOW): Used when auto-rollback did not run (ENABLE_ROLLBACK
+#              was false, or the backup was taken but auto-restore failed),
+#              and you need to manually restore from a known-good backup
+#              artifact captured by a previous pipeline run.
+#
+# HOW TO TRIGGER
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Go to GHA-Core → Actions tab → "Rollback" → Run workflow
+# 2. Fill in all inputs (see descriptions below)
+# 3. The environment_url input must match the target PP environment URL
+#    (copy from the GHA-Dynamics repo's Variables: PP_DEV_URL, PP_UAT_URL, etc.)
+#
+# BACKUP ARTIFACT NAMING
+# ─────────────────────────────────────────────────────────────────────────────
+# Backup artifacts are produced by the deploy pipeline when ENABLE_ROLLBACK=true
+# on the target environment.  Name format: backup-{Environment}-v{RunNumber}
+# Examples:   backup-UAT-v42,  backup-Prod-v101
+#
+# To find the artifact:
+#   1. Go to the original GHA-Dynamics pipeline run (build-and-deploy.yml or deploy-prod.yml)
+#   2. Scroll to Artifacts at the bottom of the run summary page
+#   3. Note the artifact name and the Run ID from the URL bar
+#
+# SAFETY
+# ─────────────────────────────────────────────────────────────────────────────
+# The `confirm` input must exactly match the target environment name.
+# This prevents accidental mis-fires (e.g. accidentally rolling back Prod
+# when you meant UAT).
+#
+# =============================================================================
+
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to roll back (used for logging and confirmation check)'
+        required: true
+        type: choice
+        options:
+          - Dev
+          - Intg
+          - UAT
+          - FRS
+          - Perf
+          - Prod
+
+      environment_url:
+        description: 'Power Platform URL of the target environment (e.g. https://contoso-uat.crm.dynamics.com)'
+        required: true
+        type: string
+
+      source_repo:
+        description: 'GHA-Dynamics repo that owns the backup artifact (org/repo format, e.g. ppudot2-cloud/GHA-Dynamics)'
+        required: true
+        type: string
+
+      source_run_id:
+        description: 'Run ID that produced the backup artifact (from the original deploy URL)'
+        required: true
+        type: string
+
+      backup_artifact_name:
+        description: 'Backup artifact name, e.g. backup-UAT-v42 (shown in Artifacts section of the original run)'
+        required: true
+        type: string
+
+      azure_client_id:
+        description: 'Azure Client ID for OIDC login (copy from GHA-Dynamics AZURE_CLIENT_ID variable)'
+        required: true
+        type: string
+
+      azure_tenant_id:
+        description: 'Azure Tenant ID for OIDC login (copy from GHA-Dynamics AZURE_TENANT_ID variable)'
+        required: true
+        type: string
+
+      azure_subscription_id:
+        description: 'Azure Subscription ID for OIDC login (copy from GHA-Dynamics AZURE_SUBSCRIPTION_ID variable)'
+        required: true
+        type: string
+
+      azure_key_vault_name:
+        description: 'Azure Key Vault name (copy from GHA-Dynamics AZURE_KEY_VAULT_NAME variable)'
+        required: true
+        type: string
+
+      mock_deploy:
+        description: 'Simulate rollback without touching Dataverse (for testing this workflow)'
+        required: false
+        default: false
+        type: boolean
+
+      confirm:
+        description: 'Type the environment name exactly (e.g. UAT) to confirm this rollback'
+        required: true
+        type: string
+
+# ── Never run concurrent rollbacks on the same environment ───────────────────
+concurrency:
+  group: rollback-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+  actions:  read   # needed to download artifacts from other repos/runs
+
+jobs:
+
+  # ── Safety gate: confirm input must match selected environment ──────────────
+  validate:
+    name: "🔒 Validate Confirmation"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation matches environment
+        shell: pwsh
+        run: |
+          $selected = '${{ inputs.environment }}'
+          $typed    = '${{ inputs.confirm }}'
+          if ($typed -ne $selected) {
+            Write-Host "::error::Confirmation mismatch. You typed '$typed' but selected environment '$selected'."
+            Write-Host "::error::Re-run the workflow and type the environment name exactly in the 'confirm' field."
+            exit 1
+          }
+          Write-Host "✅ Confirmation accepted — rolling back $selected"
+          Write-Host "   Environment URL  : ${{ inputs.environment_url }}"
+          Write-Host "   Source repo      : ${{ inputs.source_repo }}"
+          Write-Host "   Source run ID    : ${{ inputs.source_run_id }}"
+          Write-Host "   Backup artifact  : ${{ inputs.backup_artifact_name }}"
+          Write-Host "   Mock deploy      : ${{ inputs.mock_deploy }}"
+
+  # ── Rollback job ─────────────────────────────────────────────────────────────
+  rollback:
+    name: "↩️ Rollback → ${{ inputs.environment }}"
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GHA-Core
+        uses: actions/checkout@v4
+        with:
+          path: .ci
+
+      - name: Azure OIDC login
+        if: ${{ inputs.mock_deploy != true }}
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ inputs.azure_client_id }}
+          tenant-id:       ${{ inputs.azure_tenant_id }}
+          subscription-id: ${{ inputs.azure_subscription_id }}
+
+      - name: Fetch PP credentials from Azure Key Vault
+        if: ${{ inputs.mock_deploy != true }}
+        shell: pwsh
+        run: |
+          $kvName = '${{ inputs.azure_key_vault_name }}'
+          $secrets = @('PP-APP-ID', 'PP-CLIENT-SECRET', 'PP-TENANT-ID')
+          foreach ($name in $secrets) {
+            $val = az keyvault secret show --vault-name $kvName --name $name --query value -o tsv
+            if (-not $val) { Write-Error "::error::Secret '$name' not found in Key Vault '$kvName'"; exit 1 }
+            $envKey = $name.Replace('-', '_').ToUpper()
+            Write-Host "::add-mask::$val"
+            "$envKey=$val" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          Write-Host "✅ PP credentials loaded from Key Vault"
+
+      - name: Install PAC CLI
+        uses: ./.ci/.github/actions/dynamics/pac-install
+
+      - name: Download backup artifact from source repo
+        uses: actions/download-artifact@v4
+        with:
+          name:         ${{ inputs.backup_artifact_name }}
+          path:         backup/
+          run-id:       ${{ inputs.source_run_id }}
+          repository:   ${{ inputs.source_repo }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rollback solutions
+        shell: pwsh
+        run: |
+          $scriptPath = ".ci/.github/scripts/dynamics/Invoke-Rollback.ps1"
+          & $scriptPath `
+            -BackupDir       "backup" `
+            -EnvironmentUrl  "${{ inputs.environment_url }}" `
+            -EnvironmentName "${{ inputs.environment }}" `
+            -MockDeploy      $${{ inputs.mock_deploy == true }}
+
+      - name: Write rollback summary
+        if: always()
+        shell: pwsh
+        run: |
+          $env    = '${{ inputs.environment }}'
+          $url    = '${{ inputs.environment_url }}'
+          $runId  = '${{ inputs.source_run_id }}'
+          $art    = '${{ inputs.backup_artifact_name }}'
+          $actor  = '${{ github.actor }}'
+          $ts     = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+          $mock   = '${{ inputs.mock_deploy }}'
+
+          @"
+          ## ↩️ Rollback — $env
+
+          | Field | Value |
+          |---|---|
+          | Environment | **$env** |
+          | Environment URL | $url |
+          | Source Repo | ${{ inputs.source_repo }} |
+          | Source Run ID | $runId |
+          | Backup Artifact | $art |
+          | Mock Deploy | $mock |
+          | Triggered By | @$actor |
+          | Completed At | $ts |
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
