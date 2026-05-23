@@ -74,7 +74,7 @@ runs:
         repository: ppudot2-cloud/GHA-Core
         ref: main
         path: .ci
-        token: ${{ env.GHA_CORE_PAT }}
+        token: ${{ env.GHA_CORE_PAT || github.token }}
 
     # ── OIDC pre-login diagnostic ─────────────────────────────────────────────
     # Validates that all three Azure identity inputs are non-empty and prints
@@ -239,6 +239,33 @@ runs:
           Write-Host "  ✔ Fetched AKV:'$($entry.Key)' → ENV:'$($entry.Value)'"
         }
         Write-Host "✅ All secrets fetched from Azure Key Vault: $kvName"
+
+    # ── Simulation mode: inject mock credentials ──────────────────────────────
+    # When mock_deploy=true the Azure login and AKV fetch steps above are
+    # skipped entirely, so PP_APP_ID / PP_CLIENT_SECRET / PP_TENANT_ID are
+    # never populated. Inject safe mock values so downstream scripts that
+    # reference these env vars don't fail with "variable not set" errors.
+    # No real Power Platform connection is ever attempted in mock mode.
+    - name: Inject mock credentials (simulation mode)
+      if: ${{ inputs.mock_deploy == 'true' }}
+      shell: pwsh
+      run: |
+        Write-Host ""
+        Write-Host "╔══════════════════════════════════════════════════════════════════════╗"
+        Write-Host "║  SIMULATION MODE  (mock_deploy = true)                               ║"
+        Write-Host "║  Azure login and AKV fetch are skipped.                              ║"
+        Write-Host "║  Mock credentials injected — no real PP / Azure calls will be made.  ║"
+        Write-Host "╚══════════════════════════════════════════════════════════════════════╝"
+        Write-Host ""
+        @(
+          "PP_APP_ID=mock-pp-app-id-00000000-0000-0000-0000-000000000000",
+          "PP_CLIENT_SECRET=mock-pp-client-secret",
+          "PP_TENANT_ID=mock-pp-tenant-id-00000000-0000-0000-0000-000000000000",
+          "JFROG_TOKEN=mock-jfrog-token"
+        ) | ForEach-Object {
+          $_ | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "  ✔ (mock) $($_.Split('=')[0])"
+        }
 
     - name: Merge global and project variables
       shell: pwsh
