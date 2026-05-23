@@ -80,10 +80,28 @@ on:
         value: ${{ jobs.commit.outputs.feature_branch }}
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # lint  —  always runs first; gates export and commit
+  #
+  # Validates solutions.json, deployment-settings paths, project-vars.yml
+  # protected keys, and unresolved #{TOKEN}# placeholders.
+  # Failure here prevents export from running.
+  # ─────────────────────────────────────────────────────────────────────────────
+  lint:
+    name: "🔍 Lint Pipeline Config"
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ppudot2-cloud/GHA-Core/.github/workflows/_reusable-lint.yml@main
+    with:
+      solutions_json_path: 'solutions.json'
+      project_vars_path:   '.github/config/project-vars.yml'
+
   export:
     name: "📤 Export | ${{ matrix.solution.name }}"
+    needs: [lint]
     runs-on: ubuntu-latest
-    if: ${{ !inputs.skip_export }}   # skipped in manual / push-triggered mode
+    if: needs.lint.result == 'success' && !inputs.skip_export
     strategy:
       matrix: ${{ fromJson(inputs.matrix) }}
       fail-fast: false   # export failures are isolated per solution
@@ -144,11 +162,10 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   commit:
     name: "📤 Commit pipeline context"
-    needs: [export]
-    # Run even when export jobs were skipped (skip_export=true). The default
-    # GitHub Actions behaviour would skip this job too if its dependency was
-    # skipped, so we override with an explicit condition.
-    if: always() && (needs.export.result == 'success' || needs.export.result == 'skipped')
+    needs: [lint, export]
+    # Run when lint passed AND export either succeeded or was skipped (skip_export=true).
+    # If lint failed, export was skipped — we do NOT commit in that case.
+    if: needs.lint.result == 'success' && (needs.export.result == 'success' || needs.export.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write

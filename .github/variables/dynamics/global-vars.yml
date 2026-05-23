@@ -37,6 +37,7 @@ protected_keys:
   - ENABLE_ROLLBACK           # Per-environment rollback gate — set as GitHub Env var, not here
   - JFROG_URL                 # Org-wide Artifactory base URL — set once at Core layer
   - JFROG_REPO                # Org-wide Artifactory repo name — consistent across all projects
+  - BASE_SOLUTIONS            # Comma-separated base solution names for version-compare — org-wide
 
 # ── Global default values ─────────────────────────────────────────────────────
 variables:
@@ -49,6 +50,13 @@ variables:
   #   https://myorg.jfrog.io/artifactory
   JFROG_URL:  ""
   JFROG_REPO: "powerplatform-solutions"
+
+  # Base solutions for version-compare (protected: hardcoded at Core layer)
+  # Comma-separated unique names of prerequisite solutions that must be present
+  # in each environment before deploying project solutions.
+  # Example: "nfBase,nfCustomizations,nfShared"
+  # Leave empty to skip base-solution checks.
+  BASE_SOLUTIONS: ""
 
   # Deploy defaults (enforced — prevents projects from disabling safety gates)
   DEFAULT_SOLUTION_TYPE:  "managed"
