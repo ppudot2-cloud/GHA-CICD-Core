@@ -34,6 +34,9 @@ protected_keys:
   - PP_CHECKER_ERROR_LEVEL    # Minimum severity that fails the build — security gate
   - DEFAULT_SOLUTION_TYPE     # All solutions must be managed in upper environments
   - ENABLE_BACKUP             # Backups before deploy are mandatory — cannot be disabled
+  - ENABLE_ROLLBACK           # Per-environment rollback gate — set as GitHub Env var, not here
+  - JFROG_URL                 # Org-wide Artifactory base URL — set once at Core layer
+  - JFROG_REPO                # Org-wide Artifactory repo name — consistent across all projects
 
 # ── Global default values ─────────────────────────────────────────────────────
 variables:
@@ -41,7 +44,10 @@ variables:
   PP_CHECKER_GEO:         "UnitedStates"
   PP_CHECKER_ERROR_LEVEL: "HighIssue"
 
-  # JFrog Artifactory — default repo name (project can override via project-vars.yml)
+  # JFrog Artifactory — org-wide URL and repo (protected: projects cannot override)
+  # Set JFROG_URL to your organisation's Artifactory base URL, e.g.:
+  #   https://myorg.jfrog.io/artifactory
+  JFROG_URL:  ""
   JFROG_REPO: "powerplatform-solutions"
 
   # Deploy defaults (enforced — prevents projects from disabling safety gates)
