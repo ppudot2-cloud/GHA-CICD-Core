@@ -59,12 +59,6 @@ on:
         required: false
         type: string
         default: ''
-      checker_error_level:
-        description: 'Solution Checker error threshold'
-        required: false
-        type: string
-        default: 'CriticalIssueCount'
-
       # ── Validate job inputs (pipeline context forwarded from caller) ──────────
       enable_backup:
         description: 'Whether pre-import backups are enabled'
@@ -164,41 +158,15 @@ on:
         default: ''
 
 jobs:
-  build:
-    name: Build — ${{ matrix.solution.name }}
-    strategy:
-      matrix: ${{ fromJson(inputs.matrix) }}
-      fail-fast: false
-    # Job-level `uses:` + `strategy.matrix` — GitHub Actions valid pattern.
-    # A job with `uses:` cannot have `steps:` or `runs-on:`.
-    uses: ppudot2-cloud/GHA-Core/.github/workflows/_job-build.yml@main
-    with:
-      solution_name:          ${{ matrix.solution.name }}
-      solution_source_folder: ${{ matrix.solution.source_folder || 'src/solutions' }}
-      use_exported_source:    ${{ inputs.use_exported_source }}
-      checker_error_level:    ${{ inputs.checker_error_level }}
-      data_schema_file:       ${{ matrix.solution.data_schema_file || '' }}
-      source_environment_url: ${{ inputs.source_environment_url }}
-      mock_deploy:            ${{ inputs.mock_deploy }}
-      jfrog_url:              ${{ inputs.jfrog_url }}
-      jfrog_repo:             ${{ inputs.jfrog_repo }}
-      azure_client_id:        ${{ inputs.azure_client_id }}
-      azure_tenant_id:        ${{ inputs.azure_tenant_id }}
-      azure_subscription_id:  ${{ inputs.azure_subscription_id }}
-      azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
-    secrets: inherit
-
   # ─────────────────────────────────────────────────────────────────────────────
-  # validate  —  runs after ALL build jobs finish
+  # validate  —  runs FIRST, before the build matrix
   #
   # Prints all pipeline toggles, environment URLs, and service connection status
-  # so the team can confirm what is on/off before any environment is touched.
+  # so the team can confirm what is on/off before any build work begins.
   # Fails non-mock runs if required secrets or environment URLs are missing.
   # ─────────────────────────────────────────────────────────────────────────────
   validate:
     name: "🏗️ Validate Pipeline Config"
-    needs: [build]
-    if: needs.build.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -217,7 +185,7 @@ jobs:
           Write-Host "── Toggles ─────────────────────────────────────────────"
           Write-Host ("  {0,-24} {1}" -f "mock_deploy",         (Flag '${{ inputs.mock_deploy }}'))
           Write-Host ("  {0,-24} {1}" -f "enable_backup",       (Flag '${{ inputs.enable_backup }}'))
-          Write-Host ("  {0,-24} {1}" -f "checker_error_level", '${{ inputs.checker_error_level || 'HighIssue' }}')
+          Write-Host ("  {0,-24} {1}" -f "checker_error_level", 'HighIssue')
           Write-Host ("  {0,-24} {1}" -f "base_solutions",      '${{ inputs.base_solutions || '(none)' }}')
           Write-Host ""
           Write-Host "── Solutions ───────────────────────────────────────────"
@@ -280,7 +248,7 @@ jobs:
           $md += "### Toggles`n`n| Toggle | Value |`n|---|---|`n"
           $md += "| mock_deploy | $(Flag '${{ inputs.mock_deploy }}') |`n"
           $md += "| enable_backup | $(Flag '${{ inputs.enable_backup }}') |`n"
-          $md += "| checker_error_level | ``${{ inputs.checker_error_level || 'HighIssue' }}`` |`n"
+          $md += "| checker_error_level | ``HighIssue`` |`n"
           $md += "| base_solutions | ``${{ inputs.base_solutions || '(none)' }}`` |`n`n"
           $md += "### Solutions (${{ inputs.solution_count }})`n`n"
           $md += "${{ inputs.solution_list }}`n`n"
@@ -322,3 +290,35 @@ jobs:
             }
           }
           Write-Host "  ✅ Validation passed"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # build  —  runs after validate passes
+  #
+  # Fans out _job-build across every solution in the provided matrix.
+  # checker_error_level is hardcoded to 'HighIssue' — not configurable by projects.
+  # ─────────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build — ${{ matrix.solution.name }}
+    needs: [validate]
+    if: needs.validate.result == 'success'
+    strategy:
+      matrix: ${{ fromJson(inputs.matrix) }}
+      fail-fast: false
+    # Job-level `uses:` + `strategy.matrix` — GitHub Actions valid pattern.
+    # A job with `uses:` cannot have `steps:` or `runs-on:`.
+    uses: ppudot2-cloud/GHA-Core/.github/workflows/_job-build.yml@main
+    with:
+      solution_name:          ${{ matrix.solution.name }}
+      solution_source_folder: ${{ matrix.solution.source_folder || 'src/solutions' }}
+      use_exported_source:    ${{ inputs.use_exported_source }}
+      checker_error_level:    'HighIssue'
+      data_schema_file:       ${{ matrix.solution.data_schema_file || '' }}
+      source_environment_url: ${{ inputs.source_environment_url }}
+      mock_deploy:            ${{ inputs.mock_deploy }}
+      jfrog_url:              ${{ inputs.jfrog_url }}
+      jfrog_repo:             ${{ inputs.jfrog_repo }}
+      azure_client_id:        ${{ inputs.azure_client_id }}
+      azure_tenant_id:        ${{ inputs.azure_tenant_id }}
+      azure_subscription_id:  ${{ inputs.azure_subscription_id }}
+      azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
+    secrets: inherit

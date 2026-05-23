@@ -81,11 +81,10 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
-  # lint  —  always runs first; gates export and commit
+  # lint  —  runs in parallel with export; both must succeed before commit.
   #
   # Validates solutions.json, deployment-settings paths, project-vars.yml
   # protected keys, and unresolved #{TOKEN}# placeholders.
-  # Failure here prevents export from running.
   # ─────────────────────────────────────────────────────────────────────────────
   lint:
     name: "🔍 Lint Pipeline Config"
@@ -99,9 +98,8 @@ jobs:
 
   export:
     name: "📤 Export | ${{ matrix.solution.name }}"
-    needs: [lint]
     runs-on: ubuntu-latest
-    if: needs.lint.result == 'success' && !inputs.skip_export
+    if: ${{ !inputs.skip_export }}
     strategy:
       matrix: ${{ fromJson(inputs.matrix) }}
       fail-fast: false   # export failures are isolated per solution
@@ -146,7 +144,9 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # commit  —  runs after ALL export jobs finish (or are skipped)
+  # commit  —  runs after BOTH lint and export finish (or export is skipped).
+  #
+  # Lint and export run in parallel. Commit waits for both.
   #
   # skip_export=false (normal sandbox export):
   #   Creates feature/pipeline-{run_number} from origin/main, copies the
@@ -164,7 +164,7 @@ jobs:
     name: "📤 Commit pipeline context"
     needs: [lint, export]
     # Run when lint passed AND export either succeeded or was skipped (skip_export=true).
-    # If lint failed, export was skipped — we do NOT commit in that case.
+    # If lint failed we do NOT commit — bad config should not proceed.
     if: needs.lint.result == 'success' && (needs.export.result == 'success' || needs.export.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
