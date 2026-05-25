@@ -119,7 +119,7 @@ jobs:
     steps:
       # ── 1. Bootstrap ──────────────────────────────────────────────────────────
       - name: Reveille
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@v1.0.0
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
@@ -130,7 +130,7 @@ jobs:
 
       # ── 2. Install PAC CLI ────────────────────────────────────────────────────
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@v1.0.0
 
       # ── 3. Download exported source (combined-pipeline mode only) ─────────────
       # _stage-export uploaded exported-source-<name> as a GitHub artifact.
@@ -156,7 +156,7 @@ jobs:
       # ── 4. Pack solution ──────────────────────────────────────────────────────
       - name: Pack Solution
         id: pack
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pack-solution@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pack-solution@v1.0.0
         with:
           solution_name:          ${{ inputs.solution_name }}
           solution_source_folder: ${{ steps.src.outputs.folder }}
@@ -166,7 +166,7 @@ jobs:
 
       # ── 5. Solution Checker ───────────────────────────────────────────────────
       - name: Solution Checker
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/solution-checker@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/solution-checker@v1.0.0
         with:
           solution_name:         ${{ inputs.solution_name }}
           unmanaged_zip:         ${{ steps.pack.outputs.unmanaged_zip }}
@@ -178,7 +178,7 @@ jobs:
 
       # ── 6. Export config data ─────────────────────────────────────────────────
       - name: Export Config Data
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/export-config-data@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/export-config-data@v1.0.0
         with:
           solution_name:          ${{ inputs.solution_name }}
           data_schema_file:       ${{ inputs.data_schema_file }}
@@ -269,7 +269,7 @@ jobs:
       # Long-term storage and prodDeployed tagging. Not used by deploy stages.
       - name: JFrog Upload
         if: ${{ inputs.jfrog_url != '' }}
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/jfrog-upload@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/jfrog-upload@v1.0.0
         with:
           solution_name:         ${{ inputs.solution_name }}
           artifact_name:         ${{ steps.pack.outputs.artifact_name }}

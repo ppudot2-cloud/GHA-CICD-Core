@@ -91,7 +91,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: ppudot2-cloud/GHA-Core/.github/workflows/_reusable-lint.yml@main
+    uses: ppudot2-cloud/GHA-Core/.github/workflows/_reusable-lint.yml@v1.0.0
     with:
       solutions_json_path: 'solutions.json'
       project_vars_path:   '.github/config/project-vars.yml'
@@ -110,7 +110,7 @@ jobs:
     steps:
       # ── 1. Bootstrap ──────────────────────────────────────────────────────────
       - name: Reveille
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@v1.0.0
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          false
@@ -121,12 +121,12 @@ jobs:
 
       # ── 2. Install PAC CLI ────────────────────────────────────────────────────
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@v1.0.0
 
       # ── 3. Export solution from sandbox ───────────────────────────────────────
       - name: Export Solution
         id: export
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/export-solution@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/export-solution@v1.0.0
         with:
           solution_name:          ${{ matrix.solution.name }}
           source_environment_url: ${{ inputs.source_environment_url }}

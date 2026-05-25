@@ -198,7 +198,7 @@ jobs:
   mock-build:
     name: "🔨 Mock Build Stage"
     needs: setup
-    uses: ppudot2-cloud/GHA-Core/.github/workflows/_stage-build.yml@main
+    uses: ppudot2-cloud/GHA-Core/.github/workflows/_stage-build.yml@v1.0.0
     with:
       matrix:                ${{ needs.setup.outputs.matrix }}
       mock_deploy:           true
@@ -225,12 +225,12 @@ jobs:
 
     steps:
       - name: Reveille (mock — skips Azure login and AKV fetch)
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@v1.0.0
         with:
           mock_deploy: 'true'
 
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@v1.0.0
 
       - name: Download solution artifacts
         uses: actions/download-artifact@v4
@@ -242,7 +242,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Deploy all solutions → Dev (mock)
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@main
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@v1.0.0
         with:
           solutions_json:           ${{ needs.setup.outputs.matrix }}
           environment_name:         Dev
@@ -255,7 +255,7 @@ jobs:
           previous_environment_url: ''
           tag_prod_deployed:        false
           activate_flows:           true
-          mock_deploy:              true
+          mock_deploy:              'true'
           base_solutions:           ''
           jfrog_url:                ''
           jfrog_repo:               'powerplatform-solutions'
