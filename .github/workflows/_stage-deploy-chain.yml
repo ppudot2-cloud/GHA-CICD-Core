@@ -465,67 +465,10 @@ jobs:
           solution_list:            ${{ inputs.solution_list }}
           activate_flows:           ${{ inputs.activate_flows }}
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Prod  (always sequential after UAT — Prod gate provides final approval)
-#        needs: deploy-uat so Prod never starts until UAT succeeds.
-#        If UAT was skipped (not in environments filter), Prod still runs
-#        when explicitly included — skipped counts as non-blocking.
-#        tag_prod_deployed: true  → JFrog artifact tagged after success
-# ═════════════════════════════════════════════════════════════════════════════
-  deploy-prod:
-    name: "🚀 Deploy | Prod"
-    runs-on: ubuntu-latest
-    timeout-minutes: 120  # hard stop prevents SN/PP hangs from blocking runners indefinitely
-    environment: Prod
-    needs: [deploy-uat]
-    if: >-
-      (inputs.environments == '' || contains(inputs.environments, 'Prod')) &&
-      (needs.deploy-uat.result == 'success' || needs.deploy-uat.result == 'skipped')
-    env:
-      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
-
-    steps:
-      - name: Reveille
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@v1.0.0
-        with:
-          mock_deploy:            ${{ inputs.mock_deploy }}
-          jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
-          azure_client_id:        ${{ inputs.azure_client_id }}
-          azure_tenant_id:        ${{ inputs.azure_tenant_id }}
-          azure_subscription_id:  ${{ inputs.azure_subscription_id }}
-          azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
-
-      - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@v1.0.0
-
-      - name: Download solution artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: solution-artifact-*
-          path: .
-          merge-multiple: true
-          run-id: ${{ inputs.source_run_id != '' && inputs.source_run_id || github.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Deploy all solutions → Prod
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@v1.0.0
-        with:
-          solutions_json:           ${{ inputs.matrix }}
-          environment_name:         ${{ fromJson(inputs.prod_config).name }}
-          environment_url:          ${{ fromJson(inputs.prod_config).url }}
-          solution_type:            ${{ fromJson(inputs.prod_config).solution_type }}
-          enable_backup:            ${{ fromJson(inputs.prod_config).enable_backup }}
-          enable_blocking_check:    ${{ fromJson(inputs.prod_config).enable_blocking_check }}
-          enable_version_compare:   ${{ fromJson(inputs.prod_config).enable_version_compare }}
-          import_config_data:       ${{ fromJson(inputs.prod_config).import_config_data }}
-          previous_environment_url: ${{ fromJson(inputs.prod_config).previous_url }}
-          tag_prod_deployed:        true
-          mock_deploy:              ${{ inputs.mock_deploy }}
-          base_solutions:           ${{ inputs.base_solutions }}
-          jfrog_url:                ${{ inputs.jfrog_url }}
-          jfrog_repo:               ${{ inputs.jfrog_repo }}
-          run_number:               ${{ inputs.run_number }}
-          run_attempt:              ${{ inputs.run_attempt }}
-          enable_servicenow:        ${{ inputs.enable_servicenow }}
-          solution_list:            ${{ inputs.solution_list }}
-          activate_flows:           ${{ inputs.activate_flows }}
+# ─────────────────────────────────────────────────────────────────────────────
+# Prod is NOT in this chain.
+# Production is deployed by deploy-prod.yml (Pipeline 2), which has its own
+# inline deploy-uat (re-validation) and deploy-prod jobs and is triggered
+# separately on merge to main. Keeping Prod out of this chain ensures it
+# never appears — even as skipped — in Pipeline 1 run graphs.
+# ─────────────────────────────────────────────────────────────────────────────
