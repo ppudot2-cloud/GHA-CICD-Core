@@ -163,9 +163,10 @@ on:
         required: true
         type: string
       prod_config:
-        description: 'JSON config object for the Prod environment'
-        required: true
+        description: 'JSON config object for the Prod environment (omit when environments filter excludes Prod)'
+        required: false
         type: string
+        default: '{}'
 
     outputs:
       uat_result:
