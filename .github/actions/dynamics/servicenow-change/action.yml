@@ -199,9 +199,40 @@ runs:
         Request-ServiceNowApproval
         Write-Host "  ✓ Approval requested for: $env:SNOW_CHANGE_REQUEST_NUMBER"
 
-        # ── 8. Poll for approval status ────────────────────────────────────
-        Write-Host ":: Step 8 — Poll ServiceNow for approval status"
-        Get-ServiceNowApprovalStatus
+        # ── 8. Poll for approval status (55-minute wall-clock deadline) ──────────
+        # Hard deadline prevents pipelines from hanging indefinitely when
+        # ServiceNow is unreachable or the approver never responds.
+        # If the deadline passes the change request is cancelled and the pipeline fails.
+        Write-Host ":: Step 8 — Poll ServiceNow for approval status (deadline: 55 min)"
+        $deadline     = (Get-Date).AddMinutes(55)
+        $pollInterval = 60   # seconds between retries
+        $approved     = $false
+
+        while ((Get-Date) -lt $deadline) {
+          try {
+            Get-ServiceNowApprovalStatus
+            $approved = $true
+            break
+          } catch {
+            $remaining = [int](($deadline - (Get-Date)).TotalMinutes)
+            if ($remaining -le 0) { break }
+            Write-Host "  ⏳ Approval pending — retrying in ${pollInterval}s (~${remaining} min remaining)"
+            Start-Sleep -Seconds $pollInterval
+          }
+        }
+
+        if (-not $approved) {
+          Write-Host "::error::ServiceNow approval timeout — no response after 55 minutes. CR: $env:SNOW_CHANGE_REQUEST_NUMBER"
+          Write-Host "  Attempting to cancel change request to avoid orphaned CRs..."
+          try {
+            Close-ServiceNowChangeRequest -Status 'cancelled'
+            Write-Host "  ✓ Change request cancelled: $env:SNOW_CHANGE_REQUEST_NUMBER"
+          } catch {
+            Write-Warning "  Could not cancel change request: $_"
+          }
+          exit 1
+        }
+
         Write-Host "  ✓ Change request APPROVED — proceeding with deployment"
 
         Write-Host ""

@@ -1,0 +1,58 @@
+# =============================================================================
+# COMPOSITE ACTION: Bootstrap
+# =============================================================================
+#
+# Lightweight job bootstrap — checkout only, no Azure login, no AKV fetch.
+#
+# PURPOSE
+# ─────────────────────────────────────────────────────────────────────────────
+# Provides the minimal setup every runner needs:
+#   1. Checkout GHA-Dynamics (the calling repo) — fetch-depth:1
+#   2. Checkout GHA-Core CI scripts to .ci/   — fetch-depth:1, pinned to v1.0.0
+#   3. Merge global + project variables (Merge-Variables.ps1)
+#
+# WHEN TO USE BOOTSTRAP vs REVEILLE
+# ─────────────────────────────────────────────────────────────────────────────
+#   bootstrap   — jobs that do NOT need PP credentials (lint, PR creation,
+#                 summary, pipeline-test mock jobs, pure script jobs).
+#                 No Azure OIDC, no AKV calls, no JFrog/Mulesoft/ServiceNow fetches.
+#
+#   reveille    — jobs that DO need PP credentials or Azure access.
+#                 Full bootstrap + Azure OIDC login + AKV secret fetch.
+#
+# PERFORMANCE
+# ─────────────────────────────────────────────────────────────────────────────
+# fetch-depth:1 (shallow clone) is used on both checkouts instead of the
+# historical full-clone default. This reduces checkout time from ~10-30s
+# to ~2-5s on large repos while satisfying all pipeline use cases
+# (no git log, no tag history, no blame needed in any pipeline step).
+#
+# NOTE: Composite actions cannot access ${{ secrets.* }} directly.
+#       Callers must expose GHA_CORE_PAT via env: GHA_CORE_PAT on the step.
+# =============================================================================
+name: 'Bootstrap'
+description: 'Lightweight bootstrap — checkout repos (depth:1) and merge variables. No Azure/AKV.'
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout calling repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Checkout GHA-Core CI scripts
+      uses: actions/checkout@v4
+      with:
+        repository: ppudot2-cloud/GHA-Core
+        ref:        v1.0.0
+        path:       .ci
+        fetch-depth: 1
+        token: ${{ env.GHA_CORE_PAT || github.token }}
+
+    - name: Merge global and project variables
+      shell: pwsh
+      run: |
+        pwsh .ci/.github/scripts/dynamics/Merge-Variables.ps1 `
+          -GlobalVarsPath  ".ci/.github/variables/dynamics/global-vars.yml" `
+          -ProjectVarsPath ".github/config/project-vars.yml"

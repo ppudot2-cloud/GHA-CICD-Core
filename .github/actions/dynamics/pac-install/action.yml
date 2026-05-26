@@ -24,7 +24,26 @@ description: 'Install Power Platform CLI (PAC) and add to PATH'
 runs:
   using: composite
   steps:
+    # Cache key: OS + content of .github/pac-version (bump that file to force a fresh install)
+    # Cache path: ~/.dotnet/tools where `dotnet tool install -g` places global tools
+    - name: Restore PAC CLI from cache
+      id: cache-pac
+      uses: actions/cache@v4
+      with:
+        path: ~/.dotnet/tools
+        key: pac-cli-${{ runner.os }}-${{ hashFiles('.ci/.github/pac-version', '.github/pac-version') }}
+        restore-keys: |
+          pac-cli-${{ runner.os }}-
+
     - name: Install PAC CLI
+      if: steps.cache-pac.outputs.cache-hit != 'true'
       uses: microsoft/powerplatform-actions/actions-install@v1
       with:
         add-tools-to-path: true
+
+    # On cache hit the action above is skipped and tools are NOT on PATH yet —
+    # re-add the dotnet global tools directory so `pac` is callable.
+    - name: Add PAC to PATH (cache hit)
+      if: steps.cache-pac.outputs.cache-hit == 'true'
+      shell: bash
+      run: echo "$HOME/.dotnet/tools" >> $GITHUB_PATH

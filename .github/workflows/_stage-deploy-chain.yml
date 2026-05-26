@@ -104,6 +104,22 @@ on:
         required: true
         type: string
 
+      solution_list:
+        description: 'Comma-separated solution names — included in ServiceNow CR description'
+        required: false
+        type: string
+        default: ''
+      enable_servicenow:
+        description: 'Enable ServiceNow change management for all deployments in this chain'
+        required: false
+        type: boolean
+        default: false
+      activate_flows:
+        description: 'Activate Cloud Flows after each solution import'
+        required: false
+        type: boolean
+        default: true
+
       azure_client_id:
         description: 'Azure service principal client ID — passed from the caller repo (vars.AZURE_CLIENT_ID)'
         required: false
@@ -151,6 +167,11 @@ on:
         required: true
         type: string
 
+    outputs:
+      uat_result:
+        description: 'Result of the deploy-uat job (success|failure|skipped|cancelled) — used by callers to gate the PR creation step'
+        value: ${{ jobs.deploy-uat.result }}
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Dev
 # ═════════════════════════════════════════════════════════════════════════════
@@ -158,6 +179,7 @@ jobs:
   deploy-dev:
     name: "🚀 Deploy | Dev"
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # hard stop prevents SN/PP hangs from blocking runners indefinitely
     environment: Dev
     # No needs: — first in the chain
     if: inputs.environments == '' || contains(inputs.environments, 'Dev')
@@ -206,6 +228,9 @@ jobs:
           jfrog_repo:               ${{ inputs.jfrog_repo }}
           run_number:               ${{ inputs.run_number }}
           run_attempt:              ${{ inputs.run_attempt }}
+          enable_servicenow:        ${{ inputs.enable_servicenow }}
+          solution_list:            ${{ inputs.solution_list }}
+          activate_flows:           ${{ inputs.activate_flows }}
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Intg  (parallel — no dependency on Dev)
@@ -213,6 +238,7 @@ jobs:
   deploy-intg:
     name: "🚀 Deploy | Intg"
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # hard stop prevents SN/PP hangs from blocking runners indefinitely
     environment: Intg
     if: inputs.environments == '' || contains(inputs.environments, 'Intg')
     env:
@@ -260,6 +286,9 @@ jobs:
           jfrog_repo:               ${{ inputs.jfrog_repo }}
           run_number:               ${{ inputs.run_number }}
           run_attempt:              ${{ inputs.run_attempt }}
+          enable_servicenow:        ${{ inputs.enable_servicenow }}
+          solution_list:            ${{ inputs.solution_list }}
+          activate_flows:           ${{ inputs.activate_flows }}
 
 # ═════════════════════════════════════════════════════════════════════════════
 # UAT  (parallel — no dependency on Dev or Intg)
@@ -267,6 +296,7 @@ jobs:
   deploy-uat:
     name: "🚀 Deploy | UAT"
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # hard stop prevents SN/PP hangs from blocking runners indefinitely
     environment: UAT
     if: inputs.environments == '' || contains(inputs.environments, 'UAT')
     env:
@@ -314,6 +344,9 @@ jobs:
           jfrog_repo:               ${{ inputs.jfrog_repo }}
           run_number:               ${{ inputs.run_number }}
           run_attempt:              ${{ inputs.run_attempt }}
+          enable_servicenow:        ${{ inputs.enable_servicenow }}
+          solution_list:            ${{ inputs.solution_list }}
+          activate_flows:           ${{ inputs.activate_flows }}
 
 # ═════════════════════════════════════════════════════════════════════════════
 # FRS  (parallel — no dependency on Dev, Intg, or UAT)
@@ -321,6 +354,7 @@ jobs:
   deploy-frs:
     name: "🚀 Deploy | FRS"
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # hard stop prevents SN/PP hangs from blocking runners indefinitely
     environment: FRS
     if: inputs.environments == '' || contains(inputs.environments, 'FRS')
     env:
@@ -368,6 +402,9 @@ jobs:
           jfrog_repo:               ${{ inputs.jfrog_repo }}
           run_number:               ${{ inputs.run_number }}
           run_attempt:              ${{ inputs.run_attempt }}
+          enable_servicenow:        ${{ inputs.enable_servicenow }}
+          solution_list:            ${{ inputs.solution_list }}
+          activate_flows:           ${{ inputs.activate_flows }}
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Perf  (parallel — no dependency on Dev, Intg, UAT, or FRS)
@@ -375,6 +412,7 @@ jobs:
   deploy-perf:
     name: "🚀 Deploy | Perf"
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # hard stop prevents SN/PP hangs from blocking runners indefinitely
     environment: Perf
     if: inputs.environments == '' || contains(inputs.environments, 'Perf')
     env:
@@ -422,6 +460,9 @@ jobs:
           jfrog_repo:               ${{ inputs.jfrog_repo }}
           run_number:               ${{ inputs.run_number }}
           run_attempt:              ${{ inputs.run_attempt }}
+          enable_servicenow:        ${{ inputs.enable_servicenow }}
+          solution_list:            ${{ inputs.solution_list }}
+          activate_flows:           ${{ inputs.activate_flows }}
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Prod  (always sequential after UAT — Prod gate provides final approval)
@@ -433,6 +474,7 @@ jobs:
   deploy-prod:
     name: "🚀 Deploy | Prod"
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # hard stop prevents SN/PP hangs from blocking runners indefinitely
     environment: Prod
     needs: [deploy-uat]
     if: >-
@@ -483,3 +525,6 @@ jobs:
           jfrog_repo:               ${{ inputs.jfrog_repo }}
           run_number:               ${{ inputs.run_number }}
           run_attempt:              ${{ inputs.run_attempt }}
+          enable_servicenow:        ${{ inputs.enable_servicenow }}
+          solution_list:            ${{ inputs.solution_list }}
+          activate_flows:           ${{ inputs.activate_flows }}

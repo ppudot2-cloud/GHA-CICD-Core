@@ -521,6 +521,55 @@ jobs:
               print(f'\n::error::Credential health check: {critical_count} critical/expired credential(s) detected')
               sys.exit(1)
 
+      # ── Alert via webhook when critical credentials are detected ─────────
+      # Fires when critical_count > 0 AND the HEALTH_CHECK_WEBHOOK repo variable is set.
+      # The webhook receives a JSON POST with a text summary — compatible with Slack
+      # Incoming Webhooks, Teams connectors, and PagerDuty Events API v2.
+      #
+      # To enable: set HEALTH_CHECK_WEBHOOK in GHA-Core repo variables:
+      #   Settings → Secrets and variables → Variables → HEALTH_CHECK_WEBHOOK
+      #   Value example (Slack): https://hooks.slack.com/services/T.../B.../...
+      - name: Send critical alert via webhook
+        if: steps.analyse.outputs.critical_count > 0 && vars.HEALTH_CHECK_WEBHOOK != ''
+        shell: python3 {0}
+        env:
+          WEBHOOK_URL:    ${{ vars.HEALTH_CHECK_WEBHOOK }}
+          CRITICAL_COUNT: ${{ steps.analyse.outputs.critical_count }}
+          EXPIRING_COUNT: ${{ steps.analyse.outputs.expiring_count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          import json, os, urllib.request, urllib.error
+
+          webhook_url    = os.environ['WEBHOOK_URL']
+          critical_count = os.environ.get('CRITICAL_COUNT', '0')
+          expiring_count = os.environ.get('EXPIRING_COUNT', '0')
+          run_url        = os.environ.get('RUN_URL', '')
+
+          # Slack-compatible payload (also works for Teams and generic webhooks)
+          payload = {
+              'text': (
+                  f':rotating_light: *Credential Health Alert* — '
+                  f'{critical_count} critical / {expiring_count} expiring\n'
+                  f'> Credentials in Azure Key Vault or App Registrations require immediate attention.\n'
+                  f'> <{run_url}|View full report>'
+              )
+          }
+
+          data = json.dumps(payload).encode('utf-8')
+          req  = urllib.request.Request(
+              webhook_url,
+              data=data,
+              headers={'Content-Type': 'application/json'},
+              method='POST'
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  print(f'✅ Alert sent to webhook (HTTP {resp.status}): {critical_count} critical credential(s)')
+          except urllib.error.HTTPError as e:
+              print(f'::warning::Webhook notification failed (HTTP {e.code}): {e.reason}')
+          except Exception as e:
+              print(f'::warning::Webhook notification failed: {e}')
+
       # ── Create / update / close GitHub Issue ──────────────────────────────
       - name: Update GitHub Issue
         if: always()

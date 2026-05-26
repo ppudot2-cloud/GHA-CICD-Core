@@ -66,14 +66,15 @@ runs:
     - name: Checkout calling repository
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
+        fetch-depth: 1   # shallow clone — pipeline steps never need full git history
 
     - name: Checkout GHA-Core CI scripts
       uses: actions/checkout@v4
       with:
         repository: ppudot2-cloud/GHA-Core
-        ref: main
-        path: .ci
+        ref:        v1.0.0   # pinned — prevents unreviewed Core changes from breaking jobs mid-run
+        path:       .ci
+        fetch-depth: 1
         token: ${{ env.GHA_CORE_PAT || github.token }}
 
     # ── OIDC pre-login diagnostic ─────────────────────────────────────────────
@@ -228,17 +229,39 @@ runs:
           $secrets['snow-oauth-client-secret'] = 'SNOW_OAUTH_CLIENT_SECRET'
         }
 
-        foreach ($entry in $secrets.GetEnumerator()) {
-          $value = az keyvault secret show `
-            --vault-name $kvName --name $entry.Key --query value -o tsv 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to fetch AKV secret '$($entry.Key)': $value"; exit 1
+        # ── Batch fetch: all secrets in parallel (PowerShell 7 ForEach-Object -Parallel)
+        # Replaces sequential foreach loop — reduces N serial API calls to ~1-2s wall-clock
+        # regardless of how many secrets are requested.
+        $kvNameForParallel = $kvName   # capture for -Parallel closure
+        $results = $secrets.GetEnumerator() | ForEach-Object -Parallel {
+          $kv     = $using:kvNameForParallel
+          $kn     = $_.Key
+          $envKey = $_.Value
+          $val    = az keyvault secret show --vault-name $kv --name $kn --query value -o tsv 2>&1
+          [PSCustomObject]@{
+            SecretName = $kn
+            EnvKey     = $envKey
+            Value      = $val
+            Success    = ($LASTEXITCODE -eq 0)
           }
-          Write-Host "::add-mask::$value"
-          "$($entry.Value)=$value" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "  ✔ Fetched AKV:'$($entry.Key)' → ENV:'$($entry.Value)'"
+        } -ThrottleLimit 8
+
+        # Validate and export results
+        $failed = @()
+        foreach ($r in $results) {
+          if (-not $r.Success) {
+            $failed += "  ✘ AKV:'$($r.SecretName)': $($r.Value)"
+            continue
+          }
+          Write-Host "::add-mask::$($r.Value)"
+          "$($r.EnvKey)=$($r.Value)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "  ✔ Fetched AKV:'$($r.SecretName)' → ENV:'$($r.EnvKey)'"
         }
-        Write-Host "✅ All secrets fetched from Azure Key Vault: $kvName"
+        if ($failed.Count -gt 0) {
+          Write-Error "Failed to fetch $($failed.Count) secret(s) from AKV '$kvName':`n$($failed -join "`n")"
+          exit 1
+        }
+        Write-Host "✅ All $($secrets.Count) secret(s) fetched in parallel from Azure Key Vault: $kvName"
 
     # ── Simulation mode: inject mock credentials ──────────────────────────────
     # When mock_deploy=true the Azure login and AKV fetch steps above are
