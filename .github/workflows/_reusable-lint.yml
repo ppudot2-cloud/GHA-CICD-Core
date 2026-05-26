@@ -59,6 +59,9 @@ on:
         default: '.github/config/project-vars.yml'
         type: string
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   validate-config:
     name: "🔍 Validate Pipeline Configuration"

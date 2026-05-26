@@ -79,6 +79,9 @@ on:
         description: 'Feature branch created and pushed by the commit job'
         value: ${{ jobs.commit.outputs.feature_branch }}
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # lint  —  runs in parallel with export; both must succeed before commit.

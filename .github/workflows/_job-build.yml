@@ -102,6 +102,9 @@ on:
         description: 'Artifact name for Solution Checker SARIF'
         value: ${{ jobs.build.outputs.checker_artifact_name }}
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     name: Build — ${{ inputs.solution_name }}
