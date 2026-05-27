@@ -180,9 +180,15 @@ if ($topologicalOrder.Count -lt $selectedNames.Count) {
 
 $selectedEntries = $topologicalOrder | ForEach-Object {
     $sol = $registry | Where-Object { $_.name -eq $_ } | Select-Object -First 1
+    # Guard: solution name must be non-empty (empty name produces src/solutions//Other/Solution.xml)
+    if (-not $sol.name) {
+        Write-Error "::error::A solution entry in solutions.json has an empty 'name' field. All solutions must have a non-empty unique name."
+        exit 1
+    }
+    $rawFolder = if ($sol.folder) { $sol.folder } else { "src/solutions/$($sol.name)" }
     [PSCustomObject]@{
         name                       = $sol.name
-        source_folder              = if ($sol.folder) { $sol.folder } else { "src/solutions/$($sol.name)" }
+        source_folder              = $rawFolder.TrimEnd('/')   # prevent double-slash path bugs
         data_schema_file           = if ($sol.dataSchemaFile) { $sol.dataSchemaFile } else { '' }
         deployment_settings_prefix = 'deployment-settings'
     }

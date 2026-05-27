@@ -307,7 +307,7 @@ jobs:
     uses: ppudot2-cloud/GHA-Core/.github/workflows/_job-build.yml@v1.0.0
     with:
       solution_name:          ${{ matrix.solution.name }}
-      solution_source_folder: ${{ matrix.solution.source_folder || 'src/solutions' }}
+      solution_source_folder: ${{ matrix.solution.source_folder || format('src/solutions/{0}', matrix.solution.name) }}
       use_exported_source:    ${{ inputs.use_exported_source }}
       checker_error_level:    'HighIssue'
       data_schema_file:       ${{ matrix.solution.data_schema_file || '' }}
