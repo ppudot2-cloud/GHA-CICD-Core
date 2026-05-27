@@ -304,7 +304,7 @@ jobs:
       fail-fast: false
     # Job-level `uses:` + `strategy.matrix` — GitHub Actions valid pattern.
     # A job with `uses:` cannot have `steps:` or `runs-on:`.
-    uses: ppudot2-cloud/GHA-Core/.github/workflows/_job-build.yml@v1.0.2
+    uses: ppudot2-cloud/GHA-Core/.github/workflows/_job-build.yml@main
     with:
       solution_name:          ${{ matrix.solution.name }}
       solution_source_folder: ${{ matrix.solution.source_folder || format('src/solutions/{0}', matrix.solution.name) }}

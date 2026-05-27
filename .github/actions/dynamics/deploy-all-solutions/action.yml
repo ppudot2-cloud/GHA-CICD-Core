@@ -374,7 +374,7 @@ runs:
     # Blocks the pipeline until the SNOW change request is approved.
     - name: ServiceNow — Pre-Deploy (Open CR + Approval Gate)
       if: ${{ inputs.enable_servicenow == 'true' }}
-      uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/servicenow-change@v1.0.2
+      uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/servicenow-change@main
       with:
         phase:            pre-deploy
         environment_name: ${{ inputs.environment_name }}
@@ -694,7 +694,7 @@ runs:
     # No-op if pre-deploy never ran (SNOW_CHANGE_REQUEST_ID will be empty).
     - name: ServiceNow — Post-Deploy (Find Approvers + Detect Status + Close CR)
       if: ${{ always() && inputs.enable_servicenow == 'true' }}
-      uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/servicenow-change@v1.0.2
+      uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/servicenow-change@main
       with:
         phase:            post-deploy
         environment_name: ${{ inputs.environment_name }}

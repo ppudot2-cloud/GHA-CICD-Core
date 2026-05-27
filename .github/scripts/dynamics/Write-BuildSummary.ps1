@@ -35,7 +35,7 @@
 
 #>
 param(
-    [Parameter(Mandatory)][string] $SolutionName,
+    [Parameter(Mandatory)][AllowEmptyString()][string] $SolutionName,
     [Parameter(Mandatory)][AllowEmptyString()][string] $SolutionVersion,
     [Parameter(Mandatory)][AllowEmptyString()][string] $ArtifactName,
     [Parameter(Mandatory)][string] $RunNumber,
@@ -48,6 +48,9 @@ param(
     # Leave blank to skip JSON output.
     [string] $JsonOutputPath    = ''
 )
+
+# Defensive: use placeholder when upstream steps failed and supplied empty name
+if (-not $SolutionName) { $SolutionName = '(unknown)' }
 
 $checkerRow = if ($MockDeploy) {
     "| Solution Checker | mock_deploy | 🧪 Simulated (ZIP + XML validation) |"
