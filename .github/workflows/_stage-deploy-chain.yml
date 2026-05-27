@@ -143,25 +143,30 @@ on:
       # ── Per-environment config inputs ─────────────────────────────────────
       # Each is a compact JSON object — see header comment for field reference.
       dev_config:
-        description: 'JSON config object for the Dev environment'
-        required: true
+        description: 'JSON config object for the Dev environment (omit when environments filter excludes Dev)'
+        required: false
         type: string
+        default: '{}'
       intg_config:
-        description: 'JSON config object for the Intg environment'
-        required: true
+        description: 'JSON config object for the Intg environment (omit when environments filter excludes Intg)'
+        required: false
         type: string
+        default: '{}'
       uat_config:
-        description: 'JSON config object for the UAT environment'
-        required: true
+        description: 'JSON config object for the UAT environment (omit when environments filter excludes UAT)'
+        required: false
         type: string
+        default: '{}'
       frs_config:
-        description: 'JSON config object for the FRS environment'
-        required: true
+        description: 'JSON config object for the FRS environment (omit when environments filter excludes FRS)'
+        required: false
         type: string
+        default: '{}'
       perf_config:
-        description: 'JSON config object for the Perf environment'
-        required: true
+        description: 'JSON config object for the Perf environment (omit when environments filter excludes Perf)'
+        required: false
         type: string
+        default: '{}'
       prod_config:
         description: 'JSON config object for the Prod environment (omit when environments filter excludes Prod)'
         required: false
