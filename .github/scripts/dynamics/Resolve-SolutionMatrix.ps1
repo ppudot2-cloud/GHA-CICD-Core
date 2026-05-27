@@ -179,10 +179,12 @@ if ($topologicalOrder.Count -lt $selectedNames.Count) {
 }
 
 $selectedEntries = $topologicalOrder | ForEach-Object {
-    $sol = $registry | Where-Object { $_.name -eq $_ } | Select-Object -First 1
-    # Guard: solution name must be non-empty (empty name produces src/solutions//Other/Solution.xml)
-    if (-not $sol.name) {
-        Write-Error "::error::A solution entry in solutions.json has an empty 'name' field. All solutions must have a non-empty unique name."
+    $lookupName = $_   # capture outer $_ before Where-Object rebinds it to the pipeline item
+    $sol = $registry | Where-Object { $_.name -eq $lookupName } | Select-Object -First 1
+    # Guard: registry lookup must succeed (null here means topological sort returned a name
+    # that was never loaded from solutions.json — should not happen in normal flow)
+    if (-not $sol) {
+        Write-Error "::error::Solution '$lookupName' was not found in the registry after topological sort. Check solutions.json for typos or duplicate entries."
         exit 1
     }
     $rawFolder = if ($sol.folder) { $sol.folder } else { "src/solutions/$($sol.name)" }
