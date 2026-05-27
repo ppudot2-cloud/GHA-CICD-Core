@@ -173,9 +173,53 @@ on:
         type: string
         default: '{}'
 
+      # ── PR creation (Pipeline 1 only) ─────────────────────────────────────
+      # When feature_branch is set, a create-pr job runs after deploy-uat
+      # succeeds. FRS and Perf continue in parallel and do NOT block the PR.
+      feature_branch:
+        description: 'Feature branch to open PR from (empty = skip PR creation)'
+        required: false
+        type: string
+        default: ''
+      pr_base_branch:
+        description: 'Base branch for the PR (default: main)'
+        required: false
+        type: string
+        default: 'main'
+      pr_repository:
+        description: 'Repository for the PR (default: caller repo)'
+        required: false
+        type: string
+        default: ''
+      pr_run_id:
+        description: 'GitHub run ID — used in PR body link'
+        required: false
+        type: string
+        default: ''
+      pr_run_number:
+        description: 'GitHub run number — used in PR title'
+        required: false
+        type: string
+        default: ''
+      pr_actor:
+        description: 'GitHub actor who triggered the run — used in PR body'
+        required: false
+        type: string
+        default: ''
+      pr_mock_deploy:
+        description: 'Prefix PR title with [MOCK] when true'
+        required: false
+        type: boolean
+        default: false
+      pr_server_url:
+        description: 'GitHub server URL — used in PR body link'
+        required: false
+        type: string
+        default: 'https://github.com'
+
     outputs:
       uat_result:
-        description: 'Result of the deploy-uat job (success|failure|skipped|cancelled) — used by callers to gate the PR creation step'
+        description: 'Result of the deploy-uat job (success|failure|skipped|cancelled)'
         value: ${{ jobs.deploy-uat.result }}
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -480,3 +524,60 @@ jobs:
 # separately on merge to main. Keeping Prod out of this chain ensures it
 # never appears — even as skipped — in Pipeline 1 run graphs.
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ═════════════════════════════════════════════════════════════════════════════
+# create-pr  —  Opens the feature → main PR as soon as UAT passes.
+#
+# Runs only when feature_branch input is supplied (Pipeline 1 sets it;
+# Pipeline 2 and ad-hoc callers leave it empty → job is skipped).
+# FRS and Perf continue in parallel and do NOT block this job.
+# ═════════════════════════════════════════════════════════════════════════════
+  create-pr:
+    name: "🔀 Open PR → ${{ inputs.pr_base_branch || 'main' }}"
+    needs: [deploy-uat]
+    if: |
+      inputs.feature_branch != '' &&
+      needs.deploy-uat.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Create PR feature → ${{ inputs.pr_base_branch || 'main' }}
+        env:
+          GH_TOKEN: ${{ secrets.GHA_CORE_PAT }}
+        shell: bash
+        run: |
+          FEATURE="${{ inputs.feature_branch }}"
+          REPO="${{ inputs.pr_repository }}"
+          BASE="${{ inputs.pr_base_branch || 'main' }}"
+          RUN_NUMBER="${{ inputs.pr_run_number || inputs.run_number }}"
+          RUN_ID="${{ inputs.pr_run_id }}"
+          ACTOR="${{ inputs.pr_actor }}"
+          SERVER="${{ inputs.pr_server_url || 'https://github.com' }}"
+          MOCK_LABEL="${{ inputs.pr_mock_deploy == true && '[MOCK] ' || '' }}"
+
+          PR_URL=$(gh pr create \
+            --repo   "$REPO" \
+            --head   "$FEATURE" \
+            --base   "$BASE" \
+            --title  "${MOCK_LABEL}Release: pipeline run #${RUN_NUMBER}" \
+            --body   "## ✅ UAT passed — ready for Prod
+
+          **Pipeline run:** [#${RUN_NUMBER}](${SERVER}/${REPO}/actions/runs/${RUN_ID})
+          **Branch:** \`${FEATURE}\`
+          **Solutions:** ${{ inputs.solution_list }}
+          **Triggered by:** @${ACTOR}
+          **Mock deploy:** ${{ inputs.pr_mock_deploy }}
+
+          ### Gate status at PR creation
+          - [x] Solution Checker: passed
+          - [x] Dev: success
+          - [x] Intg: success
+          - [x] UAT: success ✅
+          - [ ] FRS: running in parallel (not required for this PR)
+          - [ ] Perf: running in parallel (not required for this PR)
+
+          Merging this PR triggers **deploy-prod.yml** (UAT re-validation → Prod)." \
+          )
+          echo "✅ PR created: $PR_URL"
