@@ -1,0 +1,204 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# _job-deploy.yml  —  Reusable single-environment deploy job
+#
+# Contains exactly ONE job so callers that need per-environment results
+# (e.g. "open PR only after UAT passes") can depend on this workflow
+# directly without waiting for other environments.
+#
+# build-and-deploy.yml (Pipeline 1) calls this once per environment:
+#   deploy-dev, deploy-intg, deploy-uat, deploy-frs, deploy-perf
+# All run in parallel; create-main-pr depends only on deploy-uat.
+#
+# deploy-prod.yml (Pipeline 2) calls this for UAT re-validation and Prod.
+#
+# The environment: directive uses inputs.environment_name so GitHub renders
+# an individual approval gate node per call in the Actions UI.
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  workflow_call:
+    inputs:
+      # ── Environment identity ───────────────────────────────────────────────
+      environment_name:
+        description: 'GitHub Environment name — must match a configured Environment in repo Settings'
+        required: true
+        type: string
+      environment_url:
+        description: 'Power Platform environment URL'
+        required: false
+        type: string
+        default: ''
+      previous_environment_url:
+        description: 'URL of the prior environment (used for version-compare checks)'
+        required: false
+        type: string
+        default: ''
+
+      # ── Deploy options ─────────────────────────────────────────────────────
+      solution_type:
+        description: '"Unmanaged" for Dev, "Managed" for all others'
+        required: false
+        type: string
+        default: 'Managed'
+      enable_backup:
+        description: 'Export current solution as backup before import'
+        required: false
+        type: boolean
+        default: false
+      enable_blocking_check:
+        description: 'Block on active flows / ownership locks before import'
+        required: false
+        type: boolean
+        default: true
+      enable_version_compare:
+        description: 'Skip import when installed version >= artifact version'
+        required: false
+        type: boolean
+        default: true
+      import_config_data:
+        description: 'Run pac data import after solution import'
+        required: false
+        type: boolean
+        default: false
+      tag_prod_deployed:
+        description: 'Tag artifacts as prodDeployed in JFrog after import'
+        required: false
+        type: boolean
+        default: false
+      activate_flows:
+        description: 'Activate Cloud Flows after each solution import'
+        required: false
+        type: boolean
+        default: true
+
+      # ── Solution matrix ────────────────────────────────────────────────────
+      matrix:
+        description: 'JSON array of solution objects from the setup job'
+        required: true
+        type: string
+      solution_list:
+        description: 'Comma-separated solution names — included in ServiceNow CR description'
+        required: false
+        type: string
+        default: ''
+      base_solutions:
+        description: 'Comma-separated base solution names to verify are installed'
+        required: false
+        type: string
+        default: ''
+
+      # ── Cross-run artifact source ──────────────────────────────────────────
+      source_run_id:
+        description: 'GitHub run ID to download solution artifacts from (empty = current run)'
+        required: false
+        type: string
+        default: ''
+
+      # ── Common options ─────────────────────────────────────────────────────
+      mock_deploy:
+        description: 'Simulate deployment without touching Power Platform'
+        required: false
+        type: boolean
+        default: false
+      enable_servicenow:
+        description: 'Enable ServiceNow change management'
+        required: false
+        type: boolean
+        default: false
+      jfrog_url:
+        description: 'JFrog Artifactory base URL'
+        required: false
+        type: string
+        default: ''
+      jfrog_repo:
+        description: 'JFrog repository name'
+        required: false
+        type: string
+        default: 'power-platform'
+      run_number:
+        description: 'GitHub run number (for deterministic artifact naming)'
+        required: true
+        type: string
+      run_attempt:
+        description: 'GitHub run attempt'
+        required: true
+        type: string
+
+      # ── Azure OIDC identity ────────────────────────────────────────────────
+      azure_client_id:
+        description: 'Azure service principal client ID'
+        required: false
+        type: string
+        default: ''
+      azure_tenant_id:
+        description: 'Azure tenant ID'
+        required: false
+        type: string
+        default: ''
+      azure_subscription_id:
+        description: 'Azure subscription ID'
+        required: false
+        type: string
+        default: ''
+      azure_key_vault_name:
+        description: 'Azure Key Vault name'
+        required: false
+        type: string
+        default: ''
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  deploy:
+    name: "🚀 Deploy | ${{ inputs.environment_name }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: ${{ inputs.environment_name }}
+    env:
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+
+    steps:
+      - name: Reveille
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        with:
+          mock_deploy:            ${{ inputs.mock_deploy }}
+          jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
+          azure_client_id:        ${{ inputs.azure_client_id }}
+          azure_tenant_id:        ${{ inputs.azure_tenant_id }}
+          azure_subscription_id:  ${{ inputs.azure_subscription_id }}
+          azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
+
+      - name: Install PAC CLI
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+
+      - name: Download solution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: solution-artifact-*
+          path: .
+          merge-multiple: true
+          run-id: ${{ inputs.source_run_id != '' && inputs.source_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy all solutions → ${{ inputs.environment_name }}
+        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@main
+        with:
+          solutions_json:           ${{ inputs.matrix }}
+          environment_name:         ${{ inputs.environment_name }}
+          environment_url:          ${{ inputs.environment_url }}
+          solution_type:            ${{ inputs.solution_type }}
+          enable_backup:            ${{ inputs.enable_backup }}
+          enable_blocking_check:    ${{ inputs.enable_blocking_check }}
+          enable_version_compare:   ${{ inputs.enable_version_compare }}
+          import_config_data:       ${{ inputs.import_config_data }}
+          previous_environment_url: ${{ inputs.previous_environment_url }}
+          tag_prod_deployed:        ${{ inputs.tag_prod_deployed }}
+          mock_deploy:              ${{ inputs.mock_deploy }}
+          base_solutions:           ${{ inputs.base_solutions }}
+          jfrog_url:                ${{ inputs.jfrog_url }}
+          jfrog_repo:               ${{ inputs.jfrog_repo }}
+          run_number:               ${{ inputs.run_number }}
+          run_attempt:              ${{ inputs.run_attempt }}
+          enable_servicenow:        ${{ inputs.enable_servicenow }}
+          solution_list:            ${{ inputs.solution_list }}
+          activate_flows:           ${{ inputs.activate_flows }}
