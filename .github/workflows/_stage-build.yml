@@ -115,21 +115,6 @@ on:
         required: false
         type: string
         default: ''
-      pp_app_id_set:
-        description: 'Whether PP_APP_ID secret is configured (pre-evaluated in caller)'
-        required: false
-        type: boolean
-        default: false
-      pp_secret_set:
-        description: 'Whether PP_CLIENT_SECRET secret is configured (pre-evaluated in caller)'
-        required: false
-        type: boolean
-        default: false
-      pp_tenant_set:
-        description: 'Whether PP_TENANT_ID secret is configured (pre-evaluated in caller)'
-        required: false
-        type: boolean
-        default: false
       gha_core_pat_set:
         description: 'Whether GHA_CORE_PAT secret is configured (pre-evaluated in caller)'
         required: false
@@ -212,25 +197,26 @@ jobs:
             }
           }
           Write-Host ""
-          Write-Host "── Service Connections ─────────────────────────────────"
-          $ppAppIdSet    = '${{ inputs.pp_app_id_set }}'    -eq 'true'
-          $ppSecretSet   = '${{ inputs.pp_secret_set }}'    -eq 'true'
-          $ppTenantSet   = '${{ inputs.pp_tenant_set }}'    -eq 'true'
+          Write-Host "── Azure OIDC Identity ─────────────────────────────────"
+          $azureClientId = '${{ inputs.azure_client_id }}'
+          $azureTenantId = '${{ inputs.azure_tenant_id }}'
+          $azureSubId    = '${{ inputs.azure_subscription_id }}'
+          $azureKvName   = '${{ inputs.azure_key_vault_name }}'
           $ghaCorePatSet = '${{ inputs.gha_core_pat_set }}' -eq 'true'
           if ($isMock) {
-            Write-Host "  PP_APP_ID            ⚠️  skipped (mock_deploy=true)"
-            Write-Host "  PP_CLIENT_SECRET     ⚠️  skipped (mock_deploy=true)"
-            Write-Host "  PP_TENANT_ID         ⚠️  skipped (mock_deploy=true)"
+            Write-Host "  Azure OIDC           ⚠️  skipped (mock_deploy=true)"
           } else {
-            $s1 = if ($ppAppIdSet)  { '✅  Set' } else { '❌  NOT SET' }
-            $s2 = if ($ppSecretSet) { '✅  Set' } else { '❌  NOT SET' }
-            $s3 = if ($ppTenantSet) { '✅  Set' } else { '❌  NOT SET' }
-            Write-Host ("  {0,-20} {1}" -f "PP_APP_ID",        $s1)
-            Write-Host ("  {0,-20} {1}" -f "PP_CLIENT_SECRET", $s2)
-            Write-Host ("  {0,-20} {1}" -f "PP_TENANT_ID",     $s3)
+            $a1 = if ($azureClientId) { '✅  Set' } else { '❌  NOT SET' }
+            $a2 = if ($azureTenantId) { '✅  Set' } else { '❌  NOT SET' }
+            $a3 = if ($azureSubId)    { '✅  Set' } else { '❌  NOT SET' }
+            $a4 = if ($azureKvName)   { '✅  Set' } else { '❌  NOT SET' }
+            Write-Host ("  {0,-24} {1}" -f "AZURE_CLIENT_ID",       $a1)
+            Write-Host ("  {0,-24} {1}" -f "AZURE_TENANT_ID",       $a2)
+            Write-Host ("  {0,-24} {1}" -f "AZURE_SUBSCRIPTION_ID", $a3)
+            Write-Host ("  {0,-24} {1}" -f "AZURE_KEY_VAULT_NAME",  $a4)
           }
           $s4 = if ($ghaCorePatSet) { '✅  Set' } else { '❌  NOT SET' }
-          Write-Host ("  {0,-20} {1}" -f "GHA_CORE_PAT", $s4)
+          Write-Host ("  {0,-24} {1}" -f "GHA_CORE_PAT", $s4)
           Write-Host ""
           Write-Host "── JFrog ───────────────────────────────────────────────"
           $jfrogUrl = '${{ inputs.jfrog_url }}'
@@ -257,13 +243,14 @@ jobs:
             $urlStatus = if ($e.Value) { "✅ ``$($e.Value)``" } else { "❌ **NOT SET**" }
             $md += "| $($e.Key) | $urlStatus |`n"
           }
-          $md += "`n### Service Connections`n`n| Secret | Status |`n|---|---|`n"
+          $md += "`n### Azure OIDC Identity`n`n| Variable | Status |`n|---|---|`n"
           if ($isMock) {
-            $md += "| PP credentials | ⚠️ Skipped (mock_deploy=true) |`n"
+            $md += "| Azure OIDC | ⚠️ Skipped (mock_deploy=true) |`n"
           } else {
-            $md += "| PP_APP_ID | $(if ($ppAppIdSet) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
-            $md += "| PP_CLIENT_SECRET | $(if ($ppSecretSet) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
-            $md += "| PP_TENANT_ID | $(if ($ppTenantSet) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
+            $md += "| AZURE_CLIENT_ID | $(if ($azureClientId) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
+            $md += "| AZURE_TENANT_ID | $(if ($azureTenantId) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
+            $md += "| AZURE_SUBSCRIPTION_ID | $(if ($azureSubId) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
+            $md += "| AZURE_KEY_VAULT_NAME | $(if ($azureKvName) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
           }
           $md += "| GHA_CORE_PAT | $(if ($ghaCorePatSet) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
           if ($jfrogUrl) {
@@ -273,14 +260,25 @@ jobs:
           }
           $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
-          # ── Fail non-mock if credentials or URLs are missing ─────────────────
+          # ── Fail non-mock if OIDC identity or deployment URLs are missing ────────
+          # PP credentials (PP_APP_ID etc.) are fetched from Azure Key Vault by
+          # reveille — they are NOT GitHub secrets and are not checked here.
           if (-not $isMock) {
             $errors = [System.Collections.Generic.List[string]]::new()
-            if (-not $ppAppIdSet)    { $errors.Add('PP_APP_ID secret is not set') }
-            if (-not $ppSecretSet)   { $errors.Add('PP_CLIENT_SECRET secret is not set') }
-            if (-not $ppTenantSet)   { $errors.Add('PP_TENANT_ID secret is not set') }
-            if ($missingUrls.Count -gt 0) {
-              $errors.Add("Environment URLs not configured: $($missingUrls -join ', ')")
+            if (-not $azureClientId) { $errors.Add('AZURE_CLIENT_ID repo variable is not set (Settings → Variables)') }
+            if (-not $azureTenantId) { $errors.Add('AZURE_TENANT_ID repo variable is not set') }
+            if (-not $azureSubId)    { $errors.Add('AZURE_SUBSCRIPTION_ID repo variable is not set') }
+            if (-not $azureKvName)   { $errors.Add('AZURE_KEY_VAULT_NAME repo variable is not set') }
+            # Sandbox and Prod URLs are optional for Pipeline 1 — warn, don't block
+            $optionalEnvs = @('Sandbox (export)', 'Prod')
+            foreach ($u in ($missingUrls | Where-Object { $_ -in $optionalEnvs })) {
+              $hint = if ($u -eq 'Sandbox (export)') { 'use skip_export=true or set PP_SDBX_URL' } `
+                      else { 'only needed for deploy-prod.yml (Pipeline 2)' }
+              Write-Host "  ⚠️ $u URL not set — $hint"
+            }
+            $missingRequired = $missingUrls | Where-Object { $_ -notin $optionalEnvs }
+            if ($missingRequired.Count -gt 0) {
+              $errors.Add("Deployment URLs not configured: $($missingRequired -join ', ')")
             }
             if ($errors.Count -gt 0) {
               Write-Host ""
