@@ -307,12 +307,34 @@ jobs:
             Write-Host "  ℹ No changes to commit"
           }
 
-          if ($skipExport) {
-            # Existing remote branch — use --force-with-lease for safety
-            git push origin HEAD --force-with-lease
+          # Push with retry — GitHub occasionally returns "fatal error in commit_refs"
+          # (a transient server-side error) even when the push succeeded.  We retry
+          # once, then verify the remote branch matches HEAD before failing.
+          $pushCmd = if ($skipExport) {
+            { git push origin HEAD --force-with-lease 2>&1 }
           } else {
-            # New branch — plain push
-            git push origin $branch
+            { git push origin $branch 2>&1 }
+          }
+
+          $pushOut = & $pushCmd
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "  ⚠️  First push attempt exited $LASTEXITCODE — output: $pushOut"
+            Write-Host "  ↩️  Retrying push in 5 s..."
+            Start-Sleep -Seconds 5
+            $pushOut = & $pushCmd
+            if ($LASTEXITCODE -ne 0) {
+              # Retry also failed — verify whether the branch actually landed
+              Write-Host "  ⚠️  Retry exited $LASTEXITCODE — verifying remote state..."
+              git fetch origin $branch 2>&1 | Out-Null
+              $remoteRef = git rev-parse "origin/$branch" 2>&1
+              $localRef  = git rev-parse HEAD
+              if ($remoteRef -eq $localRef) {
+                Write-Host "  ✅  Remote branch matches local HEAD ($($localRef.Substring(0,8))) — push succeeded despite error response"
+              } else {
+                Write-Error "::error::Push failed and remote branch does not match HEAD. Remote: $remoteRef  Local: $localRef"
+                exit 1
+              }
+            }
           }
           Write-Host "  ✓ Pushed branch $branch to origin"
 
