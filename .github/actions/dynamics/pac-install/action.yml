@@ -24,16 +24,6 @@ description: 'Install Power Platform CLI (PAC) and add to PATH'
 runs:
   using: composite
   steps:
-    # Pin to .NET 8 — the PAC CLI NuGet package (microsoft.powerapps.cli.tool) is not
-    # compatible with the .NET 9 SDK's tool manifest format and fails with:
-    #   "DotNetToolSettings.xml was not found in the package"
-    # ubuntu-latest runners now ship .NET 9 as the default SDK, so we must explicitly
-    # select .NET 8 before any dotnet tool install call.
-    - name: Pin .NET SDK to 8
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
-
     # Cache key: OS + content of .github/pac-version (bump that file to force a fresh install)
     # Cache path: ~/.dotnet/tools where `dotnet tool install -g` places global tools
     - name: Restore PAC CLI from cache
@@ -45,14 +35,29 @@ runs:
         restore-keys: |
           pac-cli-${{ runner.os }}-
 
-    # Install via direct dotnet tool install rather than microsoft/powerplatform-actions/actions-install@v1.
-    # The Microsoft action wraps the same dotnet tool install but adds indirection that
-    # can re-select an incompatible SDK. Installing directly keeps SDK selection explicit.
+    # Install PAC CLI using a global.json to force .NET 8 SDK selection.
+    #
+    # WHY NOT actions/setup-dotnet:
+    #   setup-dotnet@v4 tries to write to /usr/share/dotnet/host which is
+    #   system-owned on ubuntu-latest runners → permission denied.
+    #
+    # WHY NOT microsoft/powerplatform-actions/actions-install@v1:
+    #   That action wraps dotnet tool install but re-selects the runner default
+    #   (.NET 9), causing: "DotNetToolSettings.xml was not found in the package".
+    #
+    # WHY global.json WORKS:
+    #   global.json is a dotnet SDK-selection file. Placing it in the working
+    #   directory tells the dotnet CLI to use the matching SDK that is ALREADY
+    #   installed system-wide (.NET 8 ships on every ubuntu-latest image) —
+    #   no new SDK installation, no system directory writes, no permission error.
     - name: Install PAC CLI
       if: steps.cache-pac.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        dotnet tool install --global microsoft.powerapps.cli.tool
+        WORK=$(mktemp -d)
+        printf '{"sdk":{"version":"8.0.0","rollForward":"latestMinor"}}' > "$WORK/global.json"
+        (cd "$WORK" && dotnet tool install --global microsoft.powerapps.cli.tool)
+        rm -rf "$WORK"
         echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
     # On cache hit the install step above is skipped and tools are NOT on PATH yet —
