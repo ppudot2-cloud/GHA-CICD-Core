@@ -53,7 +53,7 @@ Setting `SERVICENOW_ENABLED=true` activates the full ServiceNow CR lifecycle (op
 
 | Secret | Value |
 |---|---|
-| `GHA_CORE_PAT` | Personal Access Token with `repo` scope (needs access to the private GHA-Core repo) |
+| `GHATOKEN` | Personal Access Token with `repo` scope (needs access to the private GHA-Core repo) |
 
 ---
 
@@ -248,7 +248,7 @@ python3 scripts/simulate-pipeline.py --solutions all --target-envs DEV,INTG --ru
 |---|---|---|
 | `AADSTS700016: Application not found in directory 'Contoso'` | `AZURE_TENANT_ID` variable is wrong — pointing to demo tenant | Update `AZURE_TENANT_ID` GitHub variable to your real Azure AD Tenant ID |
 | `The term '.ci/templates/steps/dynamics/...' is not recognized` | Old script path reference | Verify all scripts reference `.ci/.github/scripts/dynamics/` |
-| `fatal: could not read Username for 'https://github.com'` | `GHA_CORE_PAT` not set or expired | Update the `GHA_CORE_PAT` secret |
+| `fatal: could not read Username for 'https://github.com'` | `GHATOKEN` not set or expired | Update the `GHATOKEN` secret |
 | `Login failed: The process '/usr/bin/az' failed` | Azure OIDC misconfigured | Check federated credentials on App Registration match your repo/environment names exactly |
 | `who-am-i` step fails | PP service principal not registered in the target environment | Add the App Registration as Application User with System Administrator role |
 | `Solution package type did not match requested type` | `<Managed>0</Managed>` tag present in Solution.xml | Handled automatically by `Remove-ManagedTag.ps1` — check the pack step ran |

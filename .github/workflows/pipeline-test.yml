@@ -102,7 +102,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.caller_repo }}
-          token:      ${{ secrets.GHA_CORE_PAT }}
+          token:      ${{ secrets.GHATOKEN }}
           path:       .
 
       # Fall back to a built-in test solutions.json when running standalone from Core
@@ -224,7 +224,7 @@ jobs:
       contents: read
       actions:  read
     env:
-      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
 
     steps:
       - name: Reveille (mock — skips Azure login and AKV fetch)

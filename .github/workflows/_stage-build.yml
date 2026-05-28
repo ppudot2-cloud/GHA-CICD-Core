@@ -116,7 +116,7 @@ on:
         type: string
         default: ''
       gha_core_pat_set:
-        description: 'Whether GHA_CORE_PAT secret is configured (pre-evaluated in caller)'
+        description: 'Whether GHATOKEN secret is configured (pre-evaluated in caller)'
         required: false
         type: boolean
         default: false
@@ -216,7 +216,7 @@ jobs:
             Write-Host ("  {0,-24} {1}" -f "AZURE_KEY_VAULT_NAME",  $a4)
           }
           $s4 = if ($ghaCorePatSet) { '✅  Set' } else { '❌  NOT SET' }
-          Write-Host ("  {0,-24} {1}" -f "GHA_CORE_PAT", $s4)
+          Write-Host ("  {0,-24} {1}" -f "GHATOKEN", $s4)
           Write-Host ""
           Write-Host "── JFrog ───────────────────────────────────────────────"
           $jfrogUrl = '${{ inputs.jfrog_url }}'
@@ -252,7 +252,7 @@ jobs:
             $md += "| AZURE_SUBSCRIPTION_ID | $(if ($azureSubId) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
             $md += "| AZURE_KEY_VAULT_NAME | $(if ($azureKvName) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
           }
-          $md += "| GHA_CORE_PAT | $(if ($ghaCorePatSet) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
+          $md += "| GHATOKEN | $(if ($ghaCorePatSet) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
           if ($jfrogUrl) {
             $md += "`n### JFrog`n`n✅ Configured — ``$jfrogUrl```n"
           } else {

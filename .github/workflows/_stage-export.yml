@@ -108,7 +108,7 @@ jobs:
       fail-fast: false   # export failures are isolated per solution
 
     env:
-      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
 
     steps:
       # ── 1. Bootstrap ──────────────────────────────────────────────────────────

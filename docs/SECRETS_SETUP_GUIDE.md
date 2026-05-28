@@ -12,7 +12,7 @@ Navigate to: **GHA-Dynamics → Settings → Secrets and variables → Actions �
 
 | Secret | Description |
 |---|---|
-| `GHA_CORE_PAT` | Personal Access Token (or GitHub App token) with `repo` scope. Used to check out the private GHA-Core repository on runners and to create pull requests via `gh pr create`. Prefer a GitHub App over a PAT in production. |
+| `GHATOKEN` | Personal Access Token (or GitHub App token) with `repo` scope. Used to check out the private GHA-Core repository on runners and to create pull requests via `gh pr create`. Prefer a GitHub App over a PAT in production. |
 
 > Power Platform credentials (`PP_APP_ID`, `PP_CLIENT_SECRET`, `PP_TENANT_ID`) are **not** stored as GitHub secrets. They are stored in Azure Key Vault and fetched at runtime via OIDC. See the enterprise guide for setup.
 

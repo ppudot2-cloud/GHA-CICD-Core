@@ -19,6 +19,7 @@
    - [_stage-build.yml](#_stage-buildyml)
    - [_job-build.yml](#_job-buildyml)
    - [_stage-deploy-chain.yml](#_stage-deploy-chainyml)
+   - [_job-deploy.yml](#_job-deployyml)
    - [_reusable-lint.yml — Config Linter (new)](#_reusable-lintyml--config-linter)
    - [rollback.yml — Manual Rollback (new)](#rollbackyml--manual-rollback)
    - [pipeline-test.yml — Pipeline Integration Test (new)](#pipeline-testyml--pipeline-integration-test)
@@ -77,23 +78,25 @@ setup
   → lint-config                  (calls GHA-Core _reusable-lint.yml — failure blocks export)
   → stage-export                 (calls GHA-Core _stage-export.yml)
   → stage-build                  (calls GHA-Core _stage-build.yml)
-  → deploy-dev    ┐
-  → deploy-intg   │ parallel (each with its own GitHub Environment approval gate)
-  → deploy-uat    │
-  → deploy-frs    │
-  → deploy-perf   ┘
-  → create-main-pr (after deploy-uat succeeds)
+  → stage-deploy  (single call to _stage-deploy-chain.yml — renders as parallel jobs below)
+      ├── deploy-dev    ┐
+      ├── deploy-intg   │ all parallel; each has its own GitHub Environment approval gate
+      ├── deploy-uat    │
+      ├── deploy-frs    │
+      ├── deploy-perf   ┘
+      └── create-pr     (fires inside the chain immediately after deploy-uat succeeds;
+                         FRS and Perf continue independently and do NOT block this job)
   → pipeline-summary (always)
 ```
 
 **Key behaviours:**
-- `setup` runs `Resolve-SolutionMatrix.ps1` to read `solutions.json` and build the GitHub Actions matrix
+- `setup` runs `Resolve-SolutionMatrix.ps1` to read `solutions.json`, apply topological sort over `dependsOn`, and build the GitHub Actions matrix
 - `lint-config` calls `_reusable-lint.yml` in GHA-Core — validates solutions.json paths (now at `src/solutions/{Name}/deployment-settings-{env}.json`), project-vars.yml protected keys, unresolved tokens
 - `stage-export` calls `_stage-export.yml`; when triggered by a push event or when `skip_export=true`, the export jobs are skipped — the commit job still runs to write `pipeline-context.json`
 - `stage-build` calls `_stage-build.yml` which fans out to `_job-build.yml` per solution. Passes `vars.ENABLE_ROLLBACK` (not a dispatch input) to determine backup behaviour
-- All 5 deploy jobs run in parallel; each internally deploys solutions **sequentially** (Dataverse constraint)
-- `create-main-pr` opens a PR to main via `gh pr create` after UAT deploy succeeds
-- `pipeline-summary` calls `Write-PipelineSummary.ps1` and sends failure email if any job failed
+- `stage-deploy` is a single call to `_stage-deploy-chain.yml` — GitHub renders the 5 environment jobs as transparent parallel sibling nodes in the Actions UI, each with its own approval gate
+- The `create-pr` job lives **inside** `_stage-deploy-chain.yml` (not in `build-and-deploy.yml`) so it can depend directly on `deploy-uat` without waiting for FRS or Perf. This is required because GitHub Actions `needs:` on a reusable workflow waits for all internal jobs — moving `create-pr` inside the chain lets it fire the moment UAT passes
+- `pipeline-summary` reads `needs.stage-deploy.outputs.uat_result` and sends failure email if any stage failed
 
 ---
 
@@ -266,12 +269,52 @@ Supports two modes: **normal** (exports from sandbox, creates `feature/pipeline-
 ### `_stage-deploy-chain.yml`
 
 **Path:** `.github/workflows/_stage-deploy-chain.yml`
-**Called by:** Any caller that needs multi-environment deployment with approval gates
-**Purpose:** Parallel deploy across all environments (Dev, Intg, UAT, FRS, Perf, Prod) with individual GitHub Environment approval gates. Each environment has its own explicit job so GitHub renders a distinct "Waiting for review" gate node. All gates open simultaneously — approve all at once or selectively.
+**Called by:** `build-and-deploy.yml` (`stage-deploy` job); `deploy-prod.yml` calls `_job-deploy.yml` directly for UAT re-validation and Prod
+**Purpose:** Drives parallel promotion across all pre-prod environments (Dev, Intg, UAT, FRS, Perf) with individual GitHub Environment approval gates. Each environment is an explicit named job, not a matrix entry, so GitHub renders a distinct "Waiting for review" gate node per environment. All gates open simultaneously — approve all at once or selectively. Contains a `create-pr` job that fires immediately after UAT passes (FRS and Perf run independently and do not block it).
 
 Accepts an `environments` filter input (comma-separated) to deploy only a subset of environments. Per-environment config is passed as compact JSON objects (`dev_config`, `intg_config`, etc.).
 
-**Key inputs:** `matrix`, `mock_deploy`, `environments`, `source_run_id`, `base_solutions`, `jfrog_url`, `jfrog_repo`, `run_number`, `run_attempt`, `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`, plus per-env config objects (`dev_config`, `intg_config`, `uat_config`, `frs_config`, `perf_config`, `prod_config`)
+**Why explicit named jobs (not strategy.matrix):** `strategy.matrix` collapses all environments into a single job node in the GitHub Actions UI — individual approval gates are invisible. Named jobs with `environment: <name>` each render a distinct "Waiting for review" node when Required Reviewers are configured.
+
+**Why create-pr lives inside this workflow (not in build-and-deploy.yml):** GitHub Actions `needs:` at the caller level waits for ALL internal jobs of a reusable workflow to complete before proceeding — there is no way to depend on a single sub-job from outside. Moving `create-pr` inside the chain gives it direct access to `needs: [deploy-uat]`, so it fires the instant UAT succeeds while FRS and Perf continue in parallel.
+
+**Jobs:**
+
+| Job | Condition | Depends on |
+|---|---|---|
+| `deploy-dev` | `environments` contains `Dev` (or is empty) | none |
+| `deploy-intg` | `environments` contains `Intg` (or is empty) | none |
+| `deploy-uat` | `environments` contains `UAT` (or is empty) | none |
+| `deploy-frs` | `environments` contains `FRS` (or is empty) | none |
+| `deploy-perf` | `environments` contains `Perf` (or is empty) | none |
+| `create-pr` | `feature_branch != ''` AND `deploy-uat` succeeded | `deploy-uat` |
+
+**Key inputs:** `matrix`, `mock_deploy`, `environments`, `source_run_id`, `base_solutions`, `jfrog_url`, `jfrog_repo`, `run_number`, `run_attempt`, `solution_list`, `enable_servicenow`, `activate_flows`, `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`, per-env config objects (`dev_config`, `intg_config`, `uat_config`, `frs_config`, `perf_config`, `prod_config`)
+
+**PR creation inputs (Pipeline 1 only):** `feature_branch`, `pr_base_branch`, `pr_repository`, `pr_run_id`, `pr_run_number`, `pr_actor`, `pr_mock_deploy`, `pr_server_url` — when `feature_branch` is non-empty the `create-pr` job runs; callers that don't need PR creation simply omit these inputs
+
+**Outputs:** `uat_result` — result of the `deploy-uat` job (`success|failure|skipped|cancelled`); consumed by `pipeline-summary` in `build-and-deploy.yml`
+
+---
+
+### `_job-deploy.yml`
+
+**Path:** `.github/workflows/_job-deploy.yml`
+**Called by:** `deploy-prod.yml` — once for UAT re-validation, once for Prod
+**Purpose:** Single-environment reusable deploy job. Contains exactly one job (`deploy`) so callers can depend on a specific environment's result without being coupled to other environments. Used by Pipeline 2 where UAT and Prod deploy sequentially and the Prod job must wait for UAT success.
+
+`_stage-deploy-chain.yml` handles the 5-environment parallel pattern (Pipeline 1). `_job-deploy.yml` handles the 2-environment sequential pattern (Pipeline 2: UAT then Prod).
+
+**Key inputs:** `environment_name`, `environment_url`, `previous_environment_url`, `solution_type`, `enable_backup`, `enable_blocking_check`, `enable_version_compare`, `import_config_data`, `tag_prod_deployed`, `activate_flows`, `matrix`, `solution_list`, `base_solutions`, `source_run_id`, `mock_deploy`, `enable_servicenow`, `jfrog_url`, `jfrog_repo`, `run_number`, `run_attempt`, `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`
+
+**Job flow (single job):**
+```
+deploy
+  → Reveille
+  → Install PAC CLI
+  → Download solution artifacts (from source_run_id or current run)
+  → Deploy all solutions → <environment_name>
+```
 
 ---
 
@@ -692,12 +735,24 @@ All scripts are in `.github/scripts/dynamics/`. On the runner they are at `.ci/.
 ### `Resolve-SolutionMatrix.ps1`
 
 **Called by:** `setup` jobs in `build-and-deploy.yml`, `export-solution.yml`, `pipeline-test.yml`
-**Purpose:** Reads `solutions.json`, sorts by `deployOrder`, builds the GitHub Actions matrix JSON.
+**Purpose:** Reads `solutions.json`, resolves the selected subset, orders by `dependsOn` topology with `deployOrder` as tiebreaker, and builds the GitHub Actions matrix JSON.
+
+**Ordering algorithm — Kahn's topological sort:**
+1. Build an adjacency list and in-degree count from `dependsOn` declarations
+2. Seed the queue with zero-in-degree nodes sorted by `deployOrder`
+3. Process queue — each time a node is emitted, decrement the in-degree of its dependents; newly-ready dependents are inserted into the queue in `deployOrder` position
+4. If any nodes remain after processing: circular dependency detected → hard error
+
+`dependsOn` is enforced — `dependsOn: [A]` guarantees A imports before B regardless of their `deployOrder` values. `deployOrder` resolves ordering only when solutions have no direct dependency relationship.
+
+**Fallback chain:** `solutions.json` → filesystem scan of `src/solutions/` → `PP_SOLUTION_NAME` repo variable (single-solution repos without a `solutions.json`)
+
+**Implementation note — `$_` variable capture:** Inside the `ForEach-Object` loop that maps topological order back to registry entries, the outer `$_` is captured as `$lookupName` before the nested `Where-Object` call. This is required because `Where-Object` rebinds `$_` to the pipeline item being filtered, which would otherwise shadow and lose the loop variable.
 
 Outputs to `$GITHUB_OUTPUT`:
-- `matrix` — JSON array for strategy.matrix: `[{"name":"CoreSolution","folder":"src/...","deployOrder":1,...}]`
+- `matrix` — compact JSON array: `{"solution":[{"name":"CoreSolution","source_folder":"src/solutions/CoreSolution","data_schema_file":"","deployment_settings_prefix":"deployment-settings"},...]}` 
 - `solution_list` — comma-separated display string: `"CoreSolution, ExtensionA, ExtensionB"`
-- `solution_count` — integer
+- `solution_count` — integer count of selected solutions
 
 ---
 

@@ -155,7 +155,7 @@ jobs:
     timeout-minutes: 120
     environment: ${{ inputs.environment_name }}
     env:
-      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
 
     steps:
       - name: Reveille

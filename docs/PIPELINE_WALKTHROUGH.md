@@ -45,12 +45,12 @@ PIPELINE 1 — build-and-deploy.yml
   TRIGGER
   ├── push to feature/**  (paths-ignore: pipeline-context.json)
   └── workflow_dispatch   (inputs: solutions, skip_export, mock_deploy,
-                           checker_error_level, base_solutions, enable_backup)
+                           checker_error_level, base_solutions)
 
   JOBS (sequential unless noted)
   ┌─────────────────────────────────────────────────────────────────┐
   │  🔍 SETUP                                                       │
-  │  Resolve solution matrix  •  Check secret presence             │
+  │  Resolve solution matrix (topo sort)  •  Check secret presence │
   └────────────────────────────┬────────────────────────────────────┘
                                │
   ┌────────────────────────────▼────────────────────────────────────┐
@@ -70,15 +70,17 @@ PIPELINE 1 — build-and-deploy.yml
   └────────────────────────────┬────────────────────────────────────┘
                                │
   ┌────────────────────────────▼────────────────────────────────────┐
-  │  🚀 DEPLOY (5 parallel jobs — each has its own approval gate)  │
+  │  🚀 STAGE-DEPLOY  (_stage-deploy-chain.yml — single call)      │
+  │                                                                 │
+  │  5 environment jobs start simultaneously (all gates open):     │
   │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  │
   │  │  Dev   │  │  Intg  │  │  UAT   │  │  FRS   │  │  Perf  │  │
-  │  └────────┘  └────────┘  └────────┘  └────────┘  └────────┘  │
-  └───────────────────────┬────────────────────────────────────────┘
-                          │ UAT success only
-  ┌───────────────────────▼────────────────────────────────────────┐
-  │  🔀 Open PR → main                                             │
-  └────────────────────────────────────────────────────────────────┘
+  │  └────────┘  └────────┘  └──┬─────┘  └────────┘  └────────┘  │
+  │                              │ UAT success only                │
+  │                    ┌─────────▼──────────┐                      │
+  │                    │  🔀 Open PR → main │  ← inside chain;    │
+  │                    └────────────────────┘    FRS/Perf continue │
+  └─────────────────────────────────────────────────────────────────┘
   📋 Pipeline Summary  (if: always())
 
 
@@ -131,7 +133,7 @@ PIPELINE 2 — deploy-prod.yml
 
 #### Step 2 — Checkout GHA-Core CI scripts
 - `actions/checkout@v4` targeting `ppudot2-cloud/GHA-Core` at `ref: main`
-- Authenticated via `secrets.GHA_CORE_PAT`
+- Authenticated via `secrets.GHATOKEN`
 - Checks out to path `.ci/` in the runner workspace
 - Provides all PowerShell scripts, composite actions, global-vars.yml, and the ServiceNow module
 
@@ -429,7 +431,7 @@ Identical to Dev: Reveille → Install PAC CLI → Download solution artifacts.
 **Environment:** `UAT` — recommended to have Required Reviewers configured
 **Solution type:** `Managed`
 **Options:** `enable_blocking_check=true`, `enable_version_compare=true`, `import_config_data=false`
-**Note:** UAT success is what gates `create-main-pr`. FRS and Perf run independently.
+**Note:** UAT success gates the `create-pr` job inside `_stage-deploy-chain.yml`. FRS and Perf run independently and do not block PR creation.
 
 #### Steps 1–3
 Identical to Dev: Reveille → Install PAC CLI → Download solution artifacts.
@@ -481,15 +483,19 @@ Identical to Dev: Reveille → Install PAC CLI → Download solution artifacts.
 
 ### Job: 🔀 Open PR → main
 
-**Condition:** `needs.deploy-uat.result == 'success' && needs.stage-export.result == 'success'`
+**Defined in:** `GHA-Core/_stage-deploy-chain.yml` → `jobs.create-pr` (runs **inside** the deploy chain, not as a separate job in `build-and-deploy.yml`)
+**Condition:** `inputs.feature_branch != '' && needs.deploy-uat.result == 'success'`
 **Purpose:** Create the PR that triggers Pipeline 2. Merging this PR lands `pipeline-context.json` on main, which fires `deploy-prod.yml`.
 
+**Why it lives inside `_stage-deploy-chain.yml`:** GitHub Actions `needs:` at the caller level waits for all internal jobs of a reusable workflow to finish before a downstream job can start. If `create-pr` were a separate job in `build-and-deploy.yml` with `needs: [stage-deploy]`, it would have to wait for Dev, Intg, UAT, FRS, and Perf to all complete. Moving it inside the chain gives it a direct `needs: [deploy-uat]` dependency — it fires the moment UAT passes while FRS and Perf continue running in parallel.
+
 #### Step 1 — Create PR feature → main
-- Uses `GHA_CORE_PAT` (not `GITHUB_TOKEN`) to bypass the "Actions cannot create PRs" repository restriction
-- `gh pr create --repo <repo> --head feature/pipeline-{N} --base main`
-- **PR title:** `Release: pipeline run #N` (prefixed with `[MOCK]` if mock mode)
-- **PR body:** includes run link, branch, solution list, actor, mock flag, and a gate status checklist showing which environments passed
+- Uses `GHA_CORE_PAT` (exposed as `GH_TOKEN`) to bypass the "Actions cannot create PRs" repository restriction
+- `gh pr create --repo <repo> --head <feature_branch> --base <pr_base_branch>`
+- **PR title:** `Release: pipeline run #N` (prefixed with `[MOCK]` if `pr_mock_deploy=true`)
+- **PR body:** includes run link, branch, solution list, actor, mock flag, and a gate status checklist (`Dev ✅`, `Intg ✅`, `UAT ✅`, `FRS: running in parallel`, `Perf: running in parallel`)
 - Logs the created PR URL to the Actions log
+- Skipped entirely when `feature_branch` input is empty (Pipeline 2 and ad-hoc callers don't pass this input)
 
 ---
 

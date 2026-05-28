@@ -13,7 +13,21 @@ Callers (GHA-Dynamics repos) should pin to a release tag. See [CONTRIBUTING.md](
 
 Changes on `main` not yet tagged as a release.
 
+### Added
+
+**`_job-deploy.yml` — single-environment reusable deploy workflow**
+
+New reusable workflow at `.github/workflows/_job-deploy.yml`. Contains exactly one job (`deploy`) for a single target environment, accepting all the same deploy inputs as `_stage-deploy-chain.yml`. Used by `deploy-prod.yml` (Pipeline 2) where UAT re-validation and Prod deploy sequentially and the caller needs to depend on each environment's result independently. `_stage-deploy-chain.yml` remains the correct entrypoint for the 5-environment parallel pattern (Pipeline 1).
+
 ### Changed
+
+**`_stage-deploy-chain.yml` — PR creation moved inside the chain**
+
+The `create-pr` job (open feature → main PR) now lives inside `_stage-deploy-chain.yml` with `needs: [deploy-uat]` instead of being a separate job in `build-and-deploy.yml`. This is required because GitHub Actions `needs:` at the caller level waits for **all** internal jobs of a reusable workflow before a downstream job can start — making it impossible to fire PR creation right after UAT from the outside. Moving `create-pr` inside the chain gives it a direct `needs: [deploy-uat]` dependency: the PR opens the instant UAT passes while FRS and Perf continue running in parallel.
+
+New inputs on `_stage-deploy-chain.yml` to support this: `feature_branch`, `pr_base_branch`, `pr_repository`, `pr_run_id`, `pr_run_number`, `pr_actor`, `pr_mock_deploy`, `pr_server_url`. When `feature_branch` is empty (the default) the `create-pr` job is skipped — no behaviour change for callers that don't need PR creation.
+
+New output on `_stage-deploy-chain.yml`: `uat_result` — exposes the result of the `deploy-uat` job (`success|failure|skipped|cancelled`) so callers such as `pipeline-summary` can report per-environment status without needing to call the chain multiple times.
 
 **Architecture — Azure identity inputs now passed explicitly from callers**
 
@@ -67,6 +81,18 @@ Three new Pester v5 test files covering the governance-critical scripts (previou
 - `Resolve-SolutionMatrix.Tests.ps1` — solutions.json source, deployOrder sorting, subset selection, filesystem fallback, PP_SOLUTION_NAME fallback, no-solutions error
 
 Tests are located at `.github/servicenow/Tests/Unit/Dynamics/` and run automatically via `pipeline-test.yml` in GHA-Dynamics.
+
+### Fixed
+
+**`Resolve-SolutionMatrix.ps1` — `$_` variable scoping bug in topological sort output loop**
+
+Inside the `ForEach-Object` loop that maps the topological order list back to registry entries, the outer pipeline variable `$_` was being shadowed by a nested `Where-Object` call: `Where-Object { $_.name -eq $_ }` — the inner `Where-Object` rebinds `$_` to the item being filtered, making the comparison evaluate to `$null -eq $null` for every registry entry. The lookup always returned `$null`, causing every solution to fail with an "empty name field" error and all pipeline runs to fail at the Setup job.
+
+Fixed by capturing the outer loop value before entering the nested pipeline:
+```powershell
+$lookupName = $_   # capture outer $_ before Where-Object rebinds it
+$sol = $registry | Where-Object { $_.name -eq $lookupName } | Select-Object -First 1
+```
 
 ### Planned
 - `strict_version_compare` input for Prod/Perf environments — fail pipeline when Dataverse version query returns N/A (addresses DevSecOps finding F-07)

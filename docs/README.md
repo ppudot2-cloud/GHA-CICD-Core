@@ -13,8 +13,9 @@ GHA-Core/
 ├── .github/
 │   ├── workflows/                  # Reusable workflows (MUST be at root — GitHub constraint)
 │   │   ├── _job-build.yml          # Single-solution build job
+│   │   ├── _job-deploy.yml         # Single-environment deploy job (used by Pipeline 2)
 │   │   ├── _stage-build.yml        # Build stage (matrix per solution) + validate config
-│   │   ├── _stage-deploy-chain.yml # Parallel deploy across environments with approval gates
+│   │   ├── _stage-deploy-chain.yml # Parallel deploy across all pre-prod envs + PR creation after UAT
 │   │   └── _stage-export.yml       # Export stage (sandbox export or skip_export mode)
 │   ├── actions/dynamics/           # Composite actions
 │   │   ├── deploy-all-solutions/   # Main deploy orchestrator for one environment

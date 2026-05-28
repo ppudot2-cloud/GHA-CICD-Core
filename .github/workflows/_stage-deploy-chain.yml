@@ -237,7 +237,7 @@ jobs:
     # No needs: — first in the chain
     if: inputs.environments == '' || contains(inputs.environments, 'Dev')
     env:
-      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
 
     steps:
       - name: Reveille
@@ -295,7 +295,7 @@ jobs:
     environment: Intg
     if: inputs.environments == '' || contains(inputs.environments, 'Intg')
     env:
-      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
 
     steps:
       - name: Reveille
@@ -353,7 +353,7 @@ jobs:
     environment: UAT
     if: inputs.environments == '' || contains(inputs.environments, 'UAT')
     env:
-      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
 
     steps:
       - name: Reveille
@@ -411,7 +411,7 @@ jobs:
     environment: FRS
     if: inputs.environments == '' || contains(inputs.environments, 'FRS')
     env:
-      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
 
     steps:
       - name: Reveille
@@ -469,7 +469,7 @@ jobs:
     environment: Perf
     if: inputs.environments == '' || contains(inputs.environments, 'Perf')
     env:
-      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
+      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
 
     steps:
       - name: Reveille
@@ -545,7 +545,7 @@ jobs:
     steps:
       - name: Create PR feature → ${{ inputs.pr_base_branch || 'main' }}
         env:
-          GH_TOKEN: ${{ secrets.GHA_CORE_PAT }}
+          GH_TOKEN: ${{ secrets.GHATOKEN }}
         shell: bash
         run: |
           FEATURE="${{ inputs.feature_branch }}"
