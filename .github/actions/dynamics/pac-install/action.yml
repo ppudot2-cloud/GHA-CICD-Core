@@ -9,9 +9,14 @@
 #   use the same install mechanism and version, and keeps individual job step
 #   lists clean (one step vs. repeating the raw uses: + with: everywhere).
 #
-# PAC CLI is installed via microsoft/powerplatform-actions/actions-install,
-# which fetches the latest stable release from the Microsoft feed and adds it
-# to PATH so subsequent steps can call `pac` directly without a full path.
+# INSTALLATION STRATEGY
+#   The microsoft.powerapps.cli.tool NuGet package ships without the required
+#   DotnetToolSettings.xml manifest file, causing:
+#     "Settings file 'DotnetToolSettings.xml' was not found in the package"
+#   This happens regardless of .NET SDK version.
+#
+#   Workaround: download the .nupkg from NuGet, inject the missing
+#   DotnetToolSettings.xml, then install from the patched local feed.
 #
 # USED BY:
 #   - _job-build.yml    — needed for solution pack and Solution Checker
@@ -35,29 +40,72 @@ runs:
         restore-keys: |
           pac-cli-${{ runner.os }}-
 
-    # Install PAC CLI using a global.json to force .NET 8 SDK selection.
+    # PAC CLI NuGet package (microsoft.powerapps.cli.tool) ships without
+    # DotnetToolSettings.xml, which dotnet tool install requires.
     #
-    # WHY NOT actions/setup-dotnet:
-    #   setup-dotnet@v4 tries to write to /usr/share/dotnet/host which is
-    #   system-owned on ubuntu-latest runners → permission denied.
-    #
-    # WHY NOT microsoft/powerplatform-actions/actions-install@v1:
-    #   That action wraps dotnet tool install but re-selects the runner default
-    #   (.NET 9), causing: "DotNetToolSettings.xml was not found in the package".
-    #
-    # WHY global.json WORKS:
-    #   global.json is a dotnet SDK-selection file. Placing it in the working
-    #   directory tells the dotnet CLI to use the matching SDK that is ALREADY
-    #   installed system-wide (.NET 8 ships on every ubuntu-latest image) —
-    #   no new SDK installation, no system directory writes, no permission error.
-    - name: Install PAC CLI
+    # Fix:
+    #   1. Remove any existing broken installation (causes "failed to update" error)
+    #   2. Download the latest .nupkg from NuGet
+    #   3. Inject the missing DotnetToolSettings.xml into the zip archive
+    #   4. Install from the patched local feed using .NET 8 (via global.json)
+    - name: Install PAC CLI (patch missing DotnetToolSettings.xml)
       if: steps.cache-pac.outputs.cache-hit != 'true'
       shell: bash
       run: |
+        set -euo pipefail
+
+        # ── 1. Remove any broken existing installation ────────────────────────
+        dotnet tool uninstall --global microsoft.powerapps.cli.tool 2>/dev/null || true
+
+        # ── 2. Resolve latest version from NuGet ─────────────────────────────
+        PAC_VER=$(curl -fsSL \
+          "https://api.nuget.org/v3-flatcontainer/microsoft.powerapps.cli.tool/index.json" \
+          | python3 -c "
+        import sys, json, re
+        vers = json.load(sys.stdin)['versions']
+        def key(v): return [int(x) for x in re.split(r'[.\-]', v) if x.isdigit()]
+        print(sorted(vers, key=key)[-1])
+        ")
+        echo "PAC CLI version: $PAC_VER"
+
         WORK=$(mktemp -d)
-        printf '{"sdk":{"version":"8.0.0","rollForward":"latestMinor"}}' > "$WORK/global.json"
-        (cd "$WORK" && dotnet tool install --global microsoft.powerapps.cli.tool)
-        rm -rf "$WORK"
+        trap 'rm -rf "$WORK"' EXIT
+
+        # ── 3. Download .nupkg ────────────────────────────────────────────────
+        curl -fsSL \
+          "https://api.nuget.org/v3-flatcontainer/microsoft.powerapps.cli.tool/${PAC_VER}/microsoft.powerapps.cli.tool.${PAC_VER}.nupkg" \
+          -o "$WORK/pac.nupkg"
+
+        # ── 4. Inject DotnetToolSettings.xml (the missing file) ───────────────
+        # The file tells dotnet tool install: command name = pac, entry DLL = pac.dll
+        # We write it to a temp location then add it to the existing zip archive.
+        cat > "$WORK/DotnetToolSettings.xml" << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <DotNetCliTool Version="1">
+          <Commands>
+            <Command Name="pac" EntryPoint="pac.dll" Runner="dotnet" />
+          </Commands>
+        </DotNetCliTool>
+        XML
+        # Normalise indentation — leading spaces inside heredoc must be stripped
+        sed -i 's/^        //' "$WORK/DotnetToolSettings.xml"
+        # Add into the zip at the root level (nupkg = zip)
+        (cd "$WORK" && zip pac.nupkg DotnetToolSettings.xml)
+
+        # ── 5. Install from patched local feed using .NET 8 ──────────────────
+        mkdir -p "$WORK/local-feed"
+        cp "$WORK/pac.nupkg" "$WORK/local-feed/microsoft.powerapps.cli.tool.${PAC_VER}.nupkg"
+
+        # global.json forces .NET 8 SDK without needing setup-dotnet
+        # (setup-dotnet causes permission errors on /usr/share/dotnet/host)
+        printf '{"sdk":{"version":"8.0.0","rollForward":"latestMinor"}}' \
+          > "$WORK/global.json"
+
+        (cd "$WORK" && dotnet tool install --global \
+          --add-source "$WORK/local-feed" \
+          microsoft.powerapps.cli.tool \
+          --version "$PAC_VER")
+
         echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
     # On cache hit the install step above is skipped and tools are NOT on PATH yet —
