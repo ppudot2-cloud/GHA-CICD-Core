@@ -58,12 +58,17 @@ outputs:
 runs:
   using: composite
   steps:
-    # ── 1. Install PAC CLI (if not already on path) ─────────────────────────
-    - name: Install PAC CLI
+    # ── 1. Ensure PAC CLI is on PATH ─────────────────────────────────────────
+    # pac-install already ran earlier in the job (build or deploy) and cached
+    # the tool at ~/.dotnet/tools. Re-add that directory to PATH rather than
+    # re-running the install — avoids the .NET 9 DotNetToolSettings.xml failure.
+    - name: Ensure PAC CLI is on PATH
       if: inputs.mock_deploy != 'true'
-      uses: microsoft/powerplatform-actions/actions-install@v1
-      with:
-        add-tools-to-path: true
+      shell: bash
+      run: |
+        if ! command -v pac &> /dev/null; then
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+        fi
 
     # ── 2. Verify deployment (real) ──────────────────────────────────────────
     - name: Verify deployment
