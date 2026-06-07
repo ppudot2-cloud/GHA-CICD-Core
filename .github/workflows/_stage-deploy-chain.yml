@@ -543,6 +543,88 @@ jobs:
       pull-requests: write
       contents: read
     steps:
+      # ── Checkout the caller repo (GHA-Dynamics) at the feature branch ─────────
+      # Full history (fetch-depth: 0) is required so git log can reach the
+      # last merge commit on origin/main used as the changelog baseline.
+      - name: Checkout caller repo at feature branch
+        uses: actions/checkout@v4
+        with:
+          repository:  ${{ inputs.pr_repository }}
+          ref:         ${{ inputs.feature_branch }}
+          token:       ${{ secrets.GHATOKEN }}
+          fetch-depth: 0
+          path:        .
+
+      # ── Checkout GHA-Core so we can call Write-Changelog.ps1 ──────────────────
+      - name: Checkout GHA-Core (changelog script)
+        uses: actions/checkout@v4
+        with:
+          repository: ppudot2-cloud/GHA-Core
+          ref:        main
+          token:      ${{ secrets.GHATOKEN }}
+          path:       .ci
+
+      # ── Generate the changelog and build the complete PR body file ────────────
+      # Write-Changelog.ps1 groups commits by solution folder (solutions.json)
+      # and writes changelog.md.  This step then combines the gate-status header
+      # with the changelog into pr-body.md for  gh pr create --body-file.
+      - name: Generate changelog and build PR body
+        shell: pwsh
+        run: |
+          # Make origin/main reachable for baseline detection
+          git fetch origin main --quiet 2>&1 | Out-Null
+
+          & .ci/.github/scripts/dynamics/Write-Changelog.ps1 `
+            -SolutionsJsonPath 'solutions.json' `
+            -RunNumber         '${{ inputs.run_number }}' `
+            -FeatureBranch     '${{ inputs.feature_branch }}' `
+            -OutputPath        'changelog.md'
+
+          # Combine static PR header + generated changelog into one body file.
+          # Using [char]0x60 for backtick avoids PowerShell escape ambiguity.
+          $bt         = [char]0x60
+          $runNumber  = '${{ inputs.run_number }}'
+          $runId      = '${{ inputs.pr_run_id }}'
+          $actor      = '${{ inputs.pr_actor }}'
+          $feature    = '${{ inputs.feature_branch }}'
+          $repo       = '${{ inputs.pr_repository }}'
+          $server     = '${{ inputs.pr_server_url }}'
+          $solutions  = '${{ inputs.solution_list }}'
+          $mockDeploy = '${{ inputs.mock_deploy }}'
+
+          $changelog = if (Test-Path 'changelog.md') {
+            Get-Content 'changelog.md' -Raw -Encoding utf8
+          } else {
+            '_Changelog unavailable — see pipeline run for details._'
+          }
+
+          $sb = [System.Text.StringBuilder]::new()
+          [void]$sb.AppendLine("## ✅ UAT passed — ready for Prod")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("**Pipeline run:** [#$runNumber]($server/$repo/actions/runs/$runId)")
+          [void]$sb.AppendLine("**Branch:** $bt$feature$bt")
+          [void]$sb.AppendLine("**Solutions:** $solutions")
+          [void]$sb.AppendLine("**Triggered by:** @$actor")
+          [void]$sb.AppendLine("**Mock deploy:** $mockDeploy")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("### Gate status at PR creation")
+          [void]$sb.AppendLine("- [x] Solution Checker: passed")
+          [void]$sb.AppendLine("- [x] Dev: success")
+          [void]$sb.AppendLine("- [x] Intg: success")
+          [void]$sb.AppendLine("- [x] UAT: success ✅")
+          [void]$sb.AppendLine("- [ ] FRS: running in parallel (not required for this PR)")
+          [void]$sb.AppendLine("- [ ] Perf: running in parallel (not required for this PR)")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("Merging this PR triggers **deploy-prod.yml** (UAT re-validation → Prod).")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("---")
+          [void]$sb.AppendLine("")
+          [void]$sb.Append($changelog)
+
+          $sb.ToString() | Out-File -FilePath 'pr-body.md' -Encoding utf8 -NoNewline
+          Write-Host "✅ PR body written to pr-body.md ($($sb.Length) chars)"
+
+      # ── Open the pull request using the generated body file ───────────────────
       - name: Create PR feature → ${{ inputs.pr_base_branch || 'main' }}
         env:
           GH_TOKEN: ${{ secrets.GHATOKEN }}
@@ -551,33 +633,14 @@ jobs:
           FEATURE="${{ inputs.feature_branch }}"
           REPO="${{ inputs.pr_repository }}"
           BASE="${{ inputs.pr_base_branch || 'main' }}"
-          RUN_NUMBER="${{ inputs.pr_run_number || inputs.run_number }}"
-          RUN_ID="${{ inputs.pr_run_id }}"
-          ACTOR="${{ inputs.pr_actor }}"
-          SERVER="${{ inputs.pr_server_url || 'https://github.com' }}"
+          RUN_NUMBER="${{ inputs.run_number }}"
           MOCK_LABEL="${{ inputs.pr_mock_deploy == true && '[MOCK] ' || '' }}"
 
           PR_URL=$(gh pr create \
-            --repo   "$REPO" \
-            --head   "$FEATURE" \
-            --base   "$BASE" \
-            --title  "${MOCK_LABEL}Release: pipeline run #${RUN_NUMBER}" \
-            --body   "## ✅ UAT passed — ready for Prod
-
-          **Pipeline run:** [#${RUN_NUMBER}](${SERVER}/${REPO}/actions/runs/${RUN_ID})
-          **Branch:** \`${FEATURE}\`
-          **Solutions:** ${{ inputs.solution_list }}
-          **Triggered by:** @${ACTOR}
-          **Mock deploy:** ${{ inputs.pr_mock_deploy }}
-
-          ### Gate status at PR creation
-          - [x] Solution Checker: passed
-          - [x] Dev: success
-          - [x] Intg: success
-          - [x] UAT: success ✅
-          - [ ] FRS: running in parallel (not required for this PR)
-          - [ ] Perf: running in parallel (not required for this PR)
-
-          Merging this PR triggers **deploy-prod.yml** (UAT re-validation → Prod)." \
+            --repo      "$REPO" \
+            --head      "$FEATURE" \
+            --base      "$BASE" \
+            --title     "${MOCK_LABEL}Release: pipeline run #${RUN_NUMBER}" \
+            --body-file pr-body.md \
           )
           echo "✅ PR created: $PR_URL"
