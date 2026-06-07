@@ -570,27 +570,44 @@ jobs:
       # with the changelog into pr-body.md for  gh pr create --body-file.
       - name: Generate changelog and build PR body
         shell: pwsh
+        # Pass GHA expressions as env vars — never inline in run: strings.
+        # Env-var assignment is injection-safe: values are treated as data,
+        # not parsed as code, even if they contain quotes or shell metacharacters.
+        env:
+          PR_RUN_NUMBER:  ${{ inputs.run_number }}
+          PR_RUN_ID:      ${{ inputs.pr_run_id }}
+          PR_ACTOR:       ${{ inputs.pr_actor }}
+          PR_FEATURE:     ${{ inputs.feature_branch }}
+          PR_REPOSITORY:  ${{ inputs.pr_repository }}
+          PR_SERVER_URL:  ${{ inputs.pr_server_url }}
+          PR_SOLUTIONS:   ${{ inputs.solution_list }}
+          PR_MOCK_DEPLOY: ${{ inputs.mock_deploy }}
         run: |
-          # Make origin/main reachable for baseline detection
+          # Make origin/main reachable for baseline detection.
+          # On failure (network error, expired token), emit a warning and continue —
+          # Write-Changelog.ps1 falls back to the initial commit as the baseline.
           git fetch origin main --quiet 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Could not fetch origin/main — changelog will use full history as fallback"
+          }
 
           & .ci/.github/scripts/dynamics/Write-Changelog.ps1 `
             -SolutionsJsonPath 'solutions.json' `
-            -RunNumber         '${{ inputs.run_number }}' `
-            -FeatureBranch     '${{ inputs.feature_branch }}' `
+            -RunNumber         $env:PR_RUN_NUMBER `
+            -FeatureBranch     $env:PR_FEATURE `
             -OutputPath        'changelog.md'
 
           # Combine static PR header + generated changelog into one body file.
           # Using [char]0x60 for backtick avoids PowerShell escape ambiguity.
           $bt         = [char]0x60
-          $runNumber  = '${{ inputs.run_number }}'
-          $runId      = '${{ inputs.pr_run_id }}'
-          $actor      = '${{ inputs.pr_actor }}'
-          $feature    = '${{ inputs.feature_branch }}'
-          $repo       = '${{ inputs.pr_repository }}'
-          $server     = '${{ inputs.pr_server_url }}'
-          $solutions  = '${{ inputs.solution_list }}'
-          $mockDeploy = '${{ inputs.mock_deploy }}'
+          $runNumber  = $env:PR_RUN_NUMBER
+          $runId      = $env:PR_RUN_ID
+          $actor      = $env:PR_ACTOR
+          $feature    = $env:PR_FEATURE
+          $repo       = $env:PR_REPOSITORY
+          $server     = $env:PR_SERVER_URL
+          $solutions  = $env:PR_SOLUTIONS
+          $mockDeploy = $env:PR_MOCK_DEPLOY
 
           $changelog = if (Test-Path 'changelog.md') {
             Get-Content 'changelog.md' -Raw -Encoding utf8
