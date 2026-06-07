@@ -213,7 +213,6 @@ $pipelineCommits = @($allCommitLines | Where-Object {
 $changedSols   = $solutionSections.Count
 $runLabel      = if ($RunNumber)     { " — Run #$RunNumber" }          else { '' }
 $branchLabel   = if ($FeatureBranch) { [char]0x60 + $FeatureBranch + [char]0x60 } else { 'feature branch' }
-$baselineLabel = if ($baseShort)     { "($baseShort)" }                else { '' }
 
 $sb = [System.Text.StringBuilder]::new()
 [void]$sb.AppendLine("## 📋 Changelog$runLabel")

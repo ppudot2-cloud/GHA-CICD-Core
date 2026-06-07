@@ -29,9 +29,9 @@ BeforeAll {
     # ── Git helper: run git in a specific directory ───────────────────────────
     function Invoke-LocalGit {
         param([string]$WorkDir, [string[]]$Args)
-        & git -C $WorkDir @Args 2>&1 | Out-Null
+        $out = & git -C $WorkDir @Args 2>&1
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "git $($Args -join ' ') exited $LASTEXITCODE in $WorkDir"
+            Write-Warning "git $($Args -join ' ') exited $LASTEXITCODE in $WorkDir — $out"
         }
     }
 
