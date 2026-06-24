@@ -94,10 +94,11 @@ try {
     Write-Host "✅ Repository found: $($repo.full_name) (default branch: $($repo.default_branch))"
 } catch {
     $status = $_.Exception.Response.StatusCode.value__
-    if ($status -eq 404) {
-        Write-Error "::error::Repository '$TargetRepo' not found. Create the repository first, then re-run this workflow."
-    } else {
-        Write-Error "::error::Cannot access '$TargetRepo' (HTTP $status). Ensure GHATOKEN has repo scope for this repository."
+    switch ($status) {
+        401 { Write-Error "::error::GHATOKEN is missing or invalid (HTTP 401). Go to GHA-CICD-Core → Settings → Secrets → Actions and verify the GHATOKEN secret is set and has not expired." }
+        403 { Write-Error "::error::GHATOKEN does not have permission to access '$TargetRepo' (HTTP 403). Ensure the token has 'repo' scope and that the token owner has access to this repository." }
+        404 { Write-Error "::error::Repository '$TargetRepo' not found (HTTP 404). Create the repository first, then re-run this workflow." }
+        default { Write-Error "::error::Unexpected error accessing '$TargetRepo' (HTTP $status). Check GHATOKEN permissions and network connectivity." }
     }
     exit 1
 }
