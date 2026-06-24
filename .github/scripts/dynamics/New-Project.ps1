@@ -124,8 +124,7 @@ try {
 $defaultBranch = $repo.default_branch
 $headRef       = Invoke-GhApi 'GET' "/repos/$TargetRepo/git/ref/heads/$defaultBranch"
 $headSha       = $headRef.object.sha
-$date          = Get-Date -Format 'yyyyMMdd'
-$script:BranchName = "onboard/$SolutionName-$date"
+$script:BranchName = "feature/onboard-$SolutionName"
 
 try {
     Invoke-GhApi 'POST' "/repos/$TargetRepo/git/refs" @{
