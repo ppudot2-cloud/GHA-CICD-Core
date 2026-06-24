@@ -71,7 +71,22 @@ function Push-RepoFile {
         $existing = Invoke-GhApi 'GET' "/repos/$TargetRepo/contents/$FilePath`?ref=$script:BranchName"
         $body.sha = $existing.sha
     } catch { }
-    Invoke-GhApi 'PUT' "/repos/$TargetRepo/contents/$FilePath" $body | Out-Null
+    try {
+        Invoke-GhApi 'PUT' "/repos/$TargetRepo/contents/$FilePath" $body | Out-Null
+    } catch {
+        $status = $_.Exception.Response.StatusCode.value__
+        if ($status -eq 403 -and $FilePath -like '.github/workflows/*') {
+            Write-Error ("::error::GHATOKEN is missing the 'workflow' scope. " +
+                "GitHub requires the 'workflow' scope to create or modify files under .github/workflows/. " +
+                "Go to github.com/settings/tokens, edit the token used as GHATOKEN, " +
+                "and check the 'workflow' checkbox under 'repo'. Then re-run this workflow.")
+        } elseif ($status -eq 403) {
+            Write-Error "::error::GHATOKEN does not have write access to '$TargetRepo' (HTTP 403 on $FilePath). Ensure the token has 'repo' scope and that the token owner has write access to this repository."
+        } else {
+            Write-Error "::error::Failed to push '$FilePath' to '$TargetRepo' (HTTP $status): $($_.Exception.Message)"
+        }
+        exit 1
+    }
     Write-Host "  ✅ $FilePath"
 }
 
