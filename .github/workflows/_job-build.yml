@@ -117,7 +117,7 @@ jobs:
       checker_artifact_name: ${{ steps.pack.outputs.checker_artifact_name }}
 
     env:
-      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
 
     steps:
       # ── 1. Bootstrap ──────────────────────────────────────────────────────────

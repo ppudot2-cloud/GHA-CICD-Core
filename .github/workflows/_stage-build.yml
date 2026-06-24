@@ -10,7 +10,7 @@
 #   1. Lint: validates solutions.json, deployment-settings paths, project-vars.yml
 #            protected keys, and unresolved #{TOKEN}# placeholders.
 #   2. Runtime config: checks all 7 PP environment URLs, Azure OIDC repo variables,
-#            GHATOKEN, and JFrog. Fails non-mock runs if required values are missing.
+#            GHA_CORE_PAT, and JFrog. Fails non-mock runs if required values are missing.
 #   Merged from the former _stage-export.yml lint job + the former standalone validate job.
 #
 # Export mode (combined-pipeline):
@@ -119,7 +119,7 @@ on:
         type: string
         default: ''
       gha_core_pat_set:
-        description: 'Whether GHATOKEN secret is configured (pre-evaluated in caller)'
+        description: 'Whether GHA_CORE_PAT secret is configured (pre-evaluated in caller)'
         required: false
         type: boolean
         default: false
@@ -411,7 +411,7 @@ jobs:
             Write-Host ("  {0,-24} {1}" -f "AZURE_KEY_VAULT_NAME",  $a4)
           }
           $s4 = if ($ghaCorePatSet) { '✅  Set' } else { '❌  NOT SET' }
-          Write-Host ("  {0,-24} {1}" -f "GHATOKEN", $s4)
+          Write-Host ("  {0,-24} {1}" -f "GHA_CORE_PAT", $s4)
           Write-Host ""
           Write-Host "── JFrog ───────────────────────────────────────────────"
           $jfrogUrl = '${{ inputs.jfrog_url }}'
@@ -447,7 +447,7 @@ jobs:
             $md += "| AZURE_SUBSCRIPTION_ID | $(if ($azureSubId) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
             $md += "| AZURE_KEY_VAULT_NAME | $(if ($azureKvName) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
           }
-          $md += "| GHATOKEN | $(if ($ghaCorePatSet) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
+          $md += "| GHA_CORE_PAT | $(if ($ghaCorePatSet) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
           if ($jfrogUrl) {
             $md += "`n### JFrog`n`n✅ Configured — ``$jfrogUrl```n"
           } else {

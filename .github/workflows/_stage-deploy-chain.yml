@@ -237,7 +237,7 @@ jobs:
     # No needs: — first in the chain
     if: inputs.environments == '' || contains(inputs.environments, 'Dev')
     env:
-      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
 
     steps:
       - name: Reveille
@@ -295,7 +295,7 @@ jobs:
     environment: Intg
     if: inputs.environments == '' || contains(inputs.environments, 'Intg')
     env:
-      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
 
     steps:
       - name: Reveille
@@ -353,7 +353,7 @@ jobs:
     environment: UAT
     if: inputs.environments == '' || contains(inputs.environments, 'UAT')
     env:
-      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
 
     steps:
       - name: Reveille
@@ -411,7 +411,7 @@ jobs:
     environment: FRS
     if: inputs.environments == '' || contains(inputs.environments, 'FRS')
     env:
-      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
 
     steps:
       - name: Reveille
@@ -469,7 +469,7 @@ jobs:
     environment: Perf
     if: inputs.environments == '' || contains(inputs.environments, 'Perf')
     env:
-      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
 
     steps:
       - name: Reveille
@@ -551,7 +551,7 @@ jobs:
         with:
           repository:  ${{ inputs.pr_repository }}
           ref:         ${{ inputs.feature_branch }}
-          token:       ${{ secrets.GHATOKEN }}
+          token:       ${{ secrets.GHA_CORE_PAT }}
           fetch-depth: 0
           path:        .
 
@@ -561,7 +561,7 @@ jobs:
         with:
           repository: ppudot2-cloud/GHA-CICD-Core
           ref:        main
-          token:      ${{ secrets.GHATOKEN }}
+          token:      ${{ secrets.GHA_CORE_PAT }}
           path:       .ci
 
       # ── Generate the changelog and build the complete PR body file ────────────
@@ -644,7 +644,7 @@ jobs:
       # ── Open the pull request using the generated body file ───────────────────
       - name: Create PR feature → ${{ inputs.pr_base_branch || 'main' }}
         env:
-          GH_TOKEN: ${{ secrets.GHATOKEN }}
+          GH_TOKEN: ${{ secrets.GHA_CORE_PAT }}
         shell: bash
         run: |
           FEATURE="${{ inputs.feature_branch }}"

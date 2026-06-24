@@ -16,7 +16,7 @@
 # PREREQUISITES
 # ─────────────────────────────────────────────────────────────────────────────
 #   • Target repository must already exist (create it first, then run this)
-#   • GHATOKEN secret must have repo scope on the target repository
+#   • GHA_CORE_PAT secret must have repo scope on the target repository
 #
 # AFTER RUNNING
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ jobs:
         id: run
         shell: pwsh
         env:
-          GH_TOKEN:     ${{ secrets.GHATOKEN }}
+          GH_TOKEN:     ${{ secrets.GHA_CORE_PAT }}
           GITHUB_ACTOR: ${{ github.actor }}
         run: |
           ./.github/scripts/dynamics/New-Project.ps1 `

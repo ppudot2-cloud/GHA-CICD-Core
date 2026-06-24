@@ -76,12 +76,12 @@ function Push-RepoFile {
     } catch {
         $status = $_.Exception.Response.StatusCode.value__
         if ($status -eq 403 -and $FilePath -like '.github/workflows/*') {
-            Write-Error ("::error::GHATOKEN is missing the 'workflow' scope. " +
+            Write-Error ("::error::GHA_CORE_PAT is missing the 'workflow' scope. " +
                 "GitHub requires the 'workflow' scope to create or modify files under .github/workflows/. " +
-                "Go to github.com/settings/tokens, edit the token used as GHATOKEN, " +
+                "Go to github.com/settings/tokens, edit the token used as GHA_CORE_PAT, " +
                 "and check the 'workflow' checkbox under 'repo'. Then re-run this workflow.")
         } elseif ($status -eq 403) {
-            Write-Error "::error::GHATOKEN does not have write access to '$TargetRepo' (HTTP 403 on $FilePath). Ensure the token has 'repo' scope and that the token owner has write access to this repository."
+            Write-Error "::error::GHA_CORE_PAT does not have write access to '$TargetRepo' (HTTP 403 on $FilePath). Ensure the token has 'repo' scope and that the token owner has write access to this repository."
         } else {
             Write-Error "::error::Failed to push '$FilePath' to '$TargetRepo' (HTTP $status): $($_.Exception.Message)"
         }
@@ -110,10 +110,10 @@ try {
 } catch {
     $status = $_.Exception.Response.StatusCode.value__
     switch ($status) {
-        401 { Write-Error "::error::GHATOKEN is missing or invalid (HTTP 401). Go to GHA-CICD-Core → Settings → Secrets → Actions and verify the GHATOKEN secret is set and has not expired." }
-        403 { Write-Error "::error::GHATOKEN does not have permission to access '$TargetRepo' (HTTP 403). Ensure the token has 'repo' scope and that the token owner has access to this repository." }
+        401 { Write-Error "::error::GHA_CORE_PAT is missing or invalid (HTTP 401). Go to GHA-CICD-Core → Settings → Secrets → Actions and verify the GHA_CORE_PAT secret is set and has not expired." }
+        403 { Write-Error "::error::GHA_CORE_PAT does not have permission to access '$TargetRepo' (HTTP 403). Ensure the token has 'repo' scope and that the token owner has access to this repository." }
         404 { Write-Error "::error::Repository '$TargetRepo' not found (HTTP 404). Create the repository first, then re-run this workflow." }
-        default { Write-Error "::error::Unexpected error accessing '$TargetRepo' (HTTP $status). Check GHATOKEN permissions and network connectivity." }
+        default { Write-Error "::error::Unexpected error accessing '$TargetRepo' (HTTP $status). Check GHA_CORE_PAT permissions and network connectivity." }
     }
     exit 1
 }
@@ -304,7 +304,7 @@ $azureSteps = if ($Operation -eq 'new_project') {
 - [ ] **GitHub Variables** (Settings → Secrets and variables → Actions → Variables):
   - ``AZURE_CLIENT_ID``, ``AZURE_TENANT_ID``, ``AZURE_SUBSCRIPTION_ID``, ``AZURE_KEY_VAULT_NAME``
   - PP environment URLs are already in ``.github/config/project-vars.yml`` (update to real values)
-- [ ] **GitHub Secrets**: ``GHATOKEN`` — PAT with ``repo`` scope on this repo and GHA-CICD-Core
+- [ ] **GitHub Secrets**: ``GHA_CORE_PAT`` — PAT with ``repo`` scope on this repo and GHA-CICD-Core
 "@
 } else {
     '- [ ] Verify `deploy_order` and `depends_on` in solutions.json are correct for the pipeline sequence'

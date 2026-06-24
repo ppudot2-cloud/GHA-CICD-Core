@@ -133,7 +133,7 @@ PIPELINE 2 — deploy-prod.yml
 
 #### Step 2 — Checkout GHA-CICD-Core CI scripts
 - `actions/checkout@v4` targeting `ppudot2-cloud/GHA-CICD-Core` at `ref: main`
-- Authenticated via `secrets.GHATOKEN`
+- Authenticated via `secrets.GHA_CORE_PAT`
 - Checks out to path `.ci/` in the runner workspace
 - Provides all PowerShell scripts, composite actions, global-vars.yml, and the ServiceNow module
 
