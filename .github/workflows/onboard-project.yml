@@ -25,7 +25,7 @@
 # =============================================================================
 
 name: Onboard Project
-run-name: "Onboard Project — ${{ inputs.target_repo }}"
+run-name: "Onboard Project — ${{ inputs.solution_name }}"
 
 on:
   workflow_dispatch:
