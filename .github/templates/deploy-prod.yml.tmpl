@@ -128,7 +128,7 @@ jobs:
       contents: read
       actions:  read
     env:
-      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
     steps:
       - name: Reveille
         uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@{{GHA_CORE_REF}}
@@ -202,7 +202,7 @@ jobs:
       contents: read
       actions:  read
     env:
-      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
+      GHA_CORE_PAT: ${{ secrets.GHA_CORE_PAT }}
     steps:
       - name: Reveille
         uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@{{GHA_CORE_REF}}
