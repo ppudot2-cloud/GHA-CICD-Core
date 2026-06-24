@@ -15,8 +15,10 @@
 #     "Settings file 'DotnetToolSettings.xml' was not found in the package"
 #   This happens regardless of .NET SDK version.
 #
-#   Workaround: download the .nupkg from NuGet, inject the missing
-#   DotnetToolSettings.xml, then install from the patched local feed.
+#   Workaround: download the .nupkg, extract it, locate pac.dll inside
+#   tools/{tfm}/{rid}/, inject DotnetToolSettings.xml alongside it (dotnet
+#   requires the file at that path, NOT at the nupkg root), repack, then
+#   install from the patched local feed.
 #
 # USED BY:
 #   - _job-build.yml    — needed for solution pack and Solution Checker
@@ -79,9 +81,18 @@ runs:
           "https://api.nuget.org/v3-flatcontainer/microsoft.powerapps.cli.tool/${PAC_VER}/microsoft.powerapps.cli.tool.${PAC_VER}.nupkg" \
           -o "$WORK/pac.nupkg"
 
-        # ── 4. Inject DotnetToolSettings.xml (the missing file) ───────────────
-        # The file tells dotnet tool install: command name = pac, entry DLL = pac.dll
-        # Use printf to avoid heredoc content at column 0, which breaks YAML parsing.
+        # ── 4. Inject DotnetToolSettings.xml alongside pac.dll ──────────────
+        # dotnet tool install requires DotnetToolSettings.xml inside the
+        # tools/{tfm}/{rid}/ directory of the nupkg, NOT at the root.
+        # Extract, locate pac.dll to find that directory, inject there, repack.
+        mkdir -p "$WORK/pkg"
+        (cd "$WORK/pkg" && unzip -q "$WORK/pac.nupkg")
+
+        PAC_DLL=$(find "$WORK/pkg/tools" -name "pac.dll" 2>/dev/null | head -1)
+        [ -n "$PAC_DLL" ] || { echo "::error::pac.dll not found in nupkg" >&2; exit 1; }
+        PAC_TOOLS_DIR=$(dirname "$PAC_DLL")
+        echo "Injecting DotnetToolSettings.xml into: ${PAC_TOOLS_DIR#${WORK}/pkg/}"
+
         printf '%s\n' \
           '<?xml version="1.0" encoding="utf-8"?>' \
           '<DotNetCliTool Version="1">' \
@@ -89,9 +100,11 @@ runs:
           '    <Command Name="pac" EntryPoint="pac.dll" Runner="dotnet" />' \
           '  </Commands>' \
           '</DotNetCliTool>' \
-          > "$WORK/DotnetToolSettings.xml"
-        # Add into the zip at the root level (nupkg = zip)
-        (cd "$WORK" && zip pac.nupkg DotnetToolSettings.xml)
+          > "$PAC_TOOLS_DIR/DotnetToolSettings.xml"
+
+        # Add at the correct relative path inside the zip (e.g. tools/net8.0/any/DotnetToolSettings.xml)
+        REL_FILE="${PAC_TOOLS_DIR#${WORK}/pkg/}/DotnetToolSettings.xml"
+        (cd "$WORK/pkg" && zip "$WORK/pac.nupkg" "$REL_FILE")
 
         # ── 5. Install from patched local feed using .NET 8 ──────────────────
         mkdir -p "$WORK/local-feed"
