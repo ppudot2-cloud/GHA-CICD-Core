@@ -71,6 +71,12 @@ on:
         required: true
         type: string
 
+      publisher_prefix:
+        description: 'Power Platform publisher prefix (must match the publisher in your PP environment, e.g. contoso)'
+        required: false
+        default: 'new'
+        type: string
+
 jobs:
   onboard:
     name: "🚀 Onboard | ${{ inputs.target_repo }}"
@@ -120,6 +126,7 @@ jobs:
           Write-Host "   depends_on         : '${{ inputs.depends_on }}'"
           Write-Host "   gha_core_ref       : ${{ inputs.gha_core_ref }}"
           Write-Host "   notification_email : $email"
+          Write-Host "   publisher_prefix   : ${{ inputs.publisher_prefix || 'new' }}"
 
       - name: Run onboarding script
         id: run
@@ -136,6 +143,7 @@ jobs:
             -DependsOn          '${{ inputs.depends_on }}' `
             -GhaCoreRef         '${{ inputs.gha_core_ref || 'v1' }}' `
             -NotificationEmail  '${{ inputs.notification_email }}' `
+            -PublisherPrefix    '${{ inputs.publisher_prefix || 'new' }}' `
             -TemplatesPath      '.github/templates'
 
       - name: Summary
