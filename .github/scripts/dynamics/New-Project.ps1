@@ -196,34 +196,60 @@ if ($Operation -eq 'new_project') {
 if ($Operation -eq 'add_solution') {
     Write-Host ""
     Write-Host "── Updating solutions.json ──────────────────────────────────"
+
+    # Try to read solutions.json from the new branch (which inherits main's content).
+    # If not found on main (new_project PR still open and not merged), fall back to
+    # searching the most recent feature/onboard-* branch that has the file.
+    $currentJson = $null
+
     try {
         $existing    = Invoke-GhApi 'GET' "/repos/$TargetRepo/contents/solutions.json`?ref=$script:BranchName"
         $currentJson = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($existing.content -replace '\s', ''))
-        $registry    = $currentJson | ConvertFrom-Json
-
-        $newEntry = [pscustomobject]@{
-            name          = $SolutionName
-            folder        = "src/solutions/$SolutionName"
-            deployOrder   = [int]$DeployOrder
-            dependsOn     = @(($DependsOn.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }))
-            dataSchemaFile = "src/solutions/$SolutionName/config-data-schema.xml"
-            deploymentSettings = [pscustomobject]@{
-                dev  = "src/solutions/$SolutionName/DeploymentSettings-Dev.json"
-                intg = "src/solutions/$SolutionName/DeploymentSettings-Intg.json"
-                uat  = "src/solutions/$SolutionName/DeploymentSettings-Uat.json"
-                frs  = "src/solutions/$SolutionName/DeploymentSettings-Frs.json"
-                perf = "src/solutions/$SolutionName/DeploymentSettings-Perf.json"
-                prod = "src/solutions/$SolutionName/DeploymentSettings-Prod.json"
-            }
-        }
-
-        $registry.solutions += $newEntry
-        $updatedJson = $registry | ConvertTo-Json -Depth 10
-        Push-RepoFile 'solutions.json' $updatedJson "chore: add $SolutionName to solutions.json [onboard]"
+        Write-Host "  ✅ Found solutions.json on main"
     } catch {
-        Write-Error "::error::Failed to update solutions.json — does it exist on the $script:BranchName branch?"
-        exit 1
+        Write-Host "  ⚠️  solutions.json not found on main — searching open onboard branches..."
+        try {
+            $branches = Invoke-GhApi 'GET' "/repos/$TargetRepo/branches?per_page=100"
+            $onboardBranches = @($branches | Where-Object { $_.name -like 'feature/onboard-*' } | Sort-Object name -Descending)
+            foreach ($b in $onboardBranches) {
+                try {
+                    $existing    = Invoke-GhApi 'GET' "/repos/$TargetRepo/contents/solutions.json`?ref=$($b.name)"
+                    $currentJson = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($existing.content -replace '\s', ''))
+                    Write-Host "  ✅ Found solutions.json on $($b.name)"
+                    break
+                } catch { continue }
+            }
+        } catch { }
+
+        if (-not $currentJson) {
+            Write-Error ("::error::solutions.json not found in '$TargetRepo' on main or any open onboard branch. " +
+                "Run the 'new_project' operation first, then either merge that PR to main or re-run add_solution " +
+                "while the new_project branch is still open.")
+            exit 1
+        }
     }
+
+    $registry = $currentJson | ConvertFrom-Json
+
+    $newEntry = [pscustomobject]@{
+        name               = $SolutionName
+        folder             = "src/solutions/$SolutionName"
+        deployOrder        = [int]$DeployOrder
+        dependsOn          = @(($DependsOn.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }))
+        dataSchemaFile     = "src/solutions/$SolutionName/config-data-schema.xml"
+        deploymentSettings = [pscustomobject]@{
+            dev  = "src/solutions/$SolutionName/DeploymentSettings-Dev.json"
+            intg = "src/solutions/$SolutionName/DeploymentSettings-Intg.json"
+            uat  = "src/solutions/$SolutionName/DeploymentSettings-Uat.json"
+            frs  = "src/solutions/$SolutionName/DeploymentSettings-Frs.json"
+            perf = "src/solutions/$SolutionName/DeploymentSettings-Perf.json"
+            prod = "src/solutions/$SolutionName/DeploymentSettings-Prod.json"
+        }
+    }
+
+    $registry.solutions += $newEntry
+    $updatedJson = $registry | ConvertTo-Json -Depth 10
+    Push-RepoFile 'solutions.json' $updatedJson "chore: add $SolutionName to solutions.json [onboard]"
 }
 
 # ── Solution source stubs (both operations) ───────────────────────────────────
