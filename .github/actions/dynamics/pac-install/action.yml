@@ -10,15 +10,17 @@
 #   lists clean (one step vs. repeating the raw uses: + with: everywhere).
 #
 # INSTALLATION STRATEGY
-#   The microsoft.powerapps.cli.tool NuGet package ships without the required
-#   DotnetToolSettings.xml manifest file, causing:
-#     "Settings file 'DotnetToolSettings.xml' was not found in the package"
-#   This happens regardless of .NET SDK version.
+#   microsoft.powerapps.cli.tool targets a specific .NET TFM (net6/net8/net10…)
+#   that changes with each major PAC CLI release. Installing with the wrong SDK
+#   version produces a misleading "DotnetToolSettings.xml not found" error.
 #
-#   Workaround: download the .nupkg, extract it, locate pac.dll inside
-#   tools/{tfm}/{rid}/, inject DotnetToolSettings.xml alongside it (dotnet
-#   requires the file at that path, NOT at the nupkg root), repack, then
-#   install from the patched local feed.
+#   Strategy:
+#     1. Download the .nupkg and locate pac.dll to detect the required TFM.
+#     2. If the runner lacks that .NET SDK, install it via dotnet-install.sh
+#        into $HOME/.dotnet (avoids /usr/share/dotnet permission errors).
+#     3. Inject DotnetToolSettings.xml ONLY if the package is missing it
+#        (some older PAC CLI versions shipped without it).
+#     4. Install from a local feed using the correct SDK.
 #
 # USED BY:
 #   - _job-build.yml    — needed for solution pack and Solution Checker
@@ -57,12 +59,10 @@ runs:
         set -euo pipefail
 
         # ── 1. Remove any broken existing installation ────────────────────────
-        # Uninstall via dotnet AND scrub the tool store directory to prevent
-        # "failed to update" errors caused by leftover store metadata.
         dotnet tool uninstall --global microsoft.powerapps.cli.tool 2>/dev/null || true
         rm -rf "$HOME/.dotnet/tools/.store/microsoft.powerapps.cli.tool" 2>/dev/null || true
 
-        # ── 2. Resolve latest version from NuGet ─────────────────────────────
+        # ── 2. Resolve latest PAC CLI version ─────────────────────────────────
         PAC_VER=$(curl -fsSL \
           "https://api.nuget.org/v3-flatcontainer/microsoft.powerapps.cli.tool/index.json" \
           | python3 -c "
@@ -81,44 +81,55 @@ runs:
           "https://api.nuget.org/v3-flatcontainer/microsoft.powerapps.cli.tool/${PAC_VER}/microsoft.powerapps.cli.tool.${PAC_VER}.nupkg" \
           -o "$WORK/pac.nupkg"
 
-        # ── 4. Inject DotnetToolSettings.xml alongside pac.dll ──────────────
-        # dotnet tool install requires DotnetToolSettings.xml inside the
-        # tools/{tfm}/{rid}/ directory of the nupkg, NOT at the root.
-        # Extract, locate pac.dll to find that directory, inject there, repack.
+        # ── 4. Detect required .NET TFM from pac.dll location ─────────────────
         mkdir -p "$WORK/pkg"
         (cd "$WORK/pkg" && unzip -q "$WORK/pac.nupkg")
 
         PAC_DLL=$(find "$WORK/pkg/tools" -name "pac.dll" 2>/dev/null | head -1)
         [ -n "$PAC_DLL" ] || { echo "::error::pac.dll not found in nupkg" >&2; exit 1; }
         PAC_TOOLS_DIR=$(dirname "$PAC_DLL")
-        echo "Injecting DotnetToolSettings.xml into: ${PAC_TOOLS_DIR#${WORK}/pkg/}"
 
-        printf '%s\n' \
-          '<?xml version="1.0" encoding="utf-8"?>' \
-          '<DotNetCliTool Version="1">' \
-          '  <Commands>' \
-          '    <Command Name="pac" EntryPoint="pac.dll" Runner="dotnet" />' \
-          '  </Commands>' \
-          '</DotNetCliTool>' \
-          > "$PAC_TOOLS_DIR/DotnetToolSettings.xml"
+        # tools/net10.0/any  →  TFM=net10.0  →  DOTNET_MAJOR=10
+        TFM=$(basename "$(dirname "$PAC_TOOLS_DIR")")
+        DOTNET_MAJOR=$(echo "$TFM" | sed -E 's/net([0-9]+)\..*/\1/')
+        echo "Package targets $TFM — requires .NET $DOTNET_MAJOR"
 
-        # Add at the correct relative path inside the zip (e.g. tools/net8.0/any/DotnetToolSettings.xml)
-        REL_FILE="${PAC_TOOLS_DIR#${WORK}/pkg/}/DotnetToolSettings.xml"
-        (cd "$WORK/pkg" && zip "$WORK/pac.nupkg" "$REL_FILE")
+        # ── 5. Ensure required .NET SDK is available ──────────────────────────
+        # Use dotnet-install.sh into $HOME/.dotnet to avoid permission errors
+        # on /usr/share/dotnet that setup-dotnet@v4 can trigger on some runners.
+        if ! dotnet --list-sdks 2>/dev/null | grep -q "^${DOTNET_MAJOR}\."; then
+          echo "Installing .NET ${DOTNET_MAJOR} SDK..."
+          curl -fsSL https://dot.net/v1/dotnet-install.sh \
+            | bash -s -- --channel "${DOTNET_MAJOR}.0" --install-dir "$HOME/.dotnet"
+        fi
+        export DOTNET_ROOT="$HOME/.dotnet"
+        export PATH="$HOME/.dotnet:$PATH"
 
-        # ── 5. Install from patched local feed using .NET 8 ──────────────────
+        # ── 6. Inject DotnetToolSettings.xml only if the package lacks it ─────
+        # Older PAC CLI versions shipped without this file. Recent versions
+        # (net10.0+) already include it. Only patch when actually missing.
+        if [ ! -f "$PAC_TOOLS_DIR/DotnetToolSettings.xml" ]; then
+          echo "DotnetToolSettings.xml missing — injecting"
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="utf-8"?>' \
+            '<DotNetCliTool Version="1">' \
+            '  <Commands>' \
+            '    <Command Name="pac" EntryPoint="pac.dll" Runner="dotnet" />' \
+            '  </Commands>' \
+            '</DotNetCliTool>' \
+            > "$PAC_TOOLS_DIR/DotnetToolSettings.xml"
+          REL_FILE="${PAC_TOOLS_DIR#${WORK}/pkg/}/DotnetToolSettings.xml"
+          (cd "$WORK/pkg" && zip "$WORK/pac.nupkg" "$REL_FILE")
+        else
+          echo "DotnetToolSettings.xml already present — no patching needed"
+        fi
+
+        # ── 7. Install from local feed ────────────────────────────────────────
+        # Copy nupkg (patched or original) to a local-only NuGet feed.
+        # <clear /> ensures dotnet uses ONLY this feed, not NuGet.org.
         mkdir -p "$WORK/local-feed"
         cp "$WORK/pac.nupkg" "$WORK/local-feed/microsoft.powerapps.cli.tool.${PAC_VER}.nupkg"
 
-        # global.json forces .NET 8 SDK without needing setup-dotnet
-        # (setup-dotnet causes permission errors on /usr/share/dotnet/host)
-        printf '{"sdk":{"version":"8.0.0","rollForward":"latestMinor"}}' \
-          > "$WORK/global.json"
-
-        # nuget.config clears ALL sources so dotnet uses ONLY our patched local
-        # feed — without this, --add-source still allows dotnet to resolve from
-        # NuGet.org and fetch the unpatched package, ignoring our local copy.
-        # Use printf to avoid heredoc content at column 0 breaking YAML parsing.
         printf '%s\n' \
           '<?xml version="1.0" encoding="utf-8"?>' \
           '<configuration>' \
@@ -129,10 +140,10 @@ runs:
           '</configuration>' \
           > "$WORK/nuget.config"
 
-        (cd "$WORK" && dotnet tool install --global \
+        dotnet tool install --global \
           --configfile "$WORK/nuget.config" \
           microsoft.powerapps.cli.tool \
-          --version "$PAC_VER")
+          --version "$PAC_VER"
 
         echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
