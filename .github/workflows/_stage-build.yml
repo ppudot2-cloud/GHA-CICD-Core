@@ -5,10 +5,13 @@
 # job-level `uses:` + `strategy.matrix` (the only valid GitHub pattern for
 # calling reusable workflows in parallel across a matrix).
 #
-# After all build jobs complete:
-#   validate – prints all pipeline toggles, environment URLs, and service
-#              connection status. Fails non-mock runs if secrets or URLs are
-#              missing. Appears as a job inside the Build stage group in the UI.
+# First job: validate
+#   Runs before the build matrix. Does ALL pre-build validation in one gate:
+#   1. Lint: validates solutions.json, deployment-settings paths, project-vars.yml
+#            protected keys, and unresolved #{TOKEN}# placeholders.
+#   2. Runtime config: checks all 7 PP environment URLs, Azure OIDC repo variables,
+#            GHATOKEN, and JFrog. Fails non-mock runs if required values are missing.
+#   Merged from the former _stage-export.yml lint job + the former standalone validate job.
 #
 # Export mode (combined-pipeline):
 #   Pass source_environment_url = PP_SDBX_URL to enable _job-build's optional
@@ -151,11 +154,204 @@ jobs:
   # Fails non-mock runs if required secrets or environment URLs are missing.
   # ─────────────────────────────────────────────────────────────────────────────
   validate:
-    name: "🏗️ Validate Pipeline Config"
+    name: "✅ Lint + Validate Pipeline Config"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
-      - name: Print toggles and validate config
+      # ── Lint: file-system checks (solutions.json, deployment-settings, project-vars.yml) ──
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PyYAML
+        run: pip install pyyaml --quiet
+
+      - name: Lint config files
+        id: lint
+        shell: python
+        run: |
+          import json, yaml, os, sys, re
+          from xml.etree import ElementTree as ET
+
+          SOLUTIONS_FILE = 'solutions.json'
+          PROJ_VARS_FILE = '.github/config/project-vars.yml'
+          PROTECTED_KEYS = {
+            'PP_CHECKER_GEO', 'PP_CHECKER_ERROR_LEVEL',
+            'DEFAULT_SOLUTION_TYPE', 'ENABLE_BACKUP', 'ENABLE_ROLLBACK'
+          }
+
+          errors   = []
+          warnings = []
+
+          if not os.path.isfile(SOLUTIONS_FILE):
+              print(f'::error::{SOLUTIONS_FILE} not found — this file is required')
+              sys.exit(1)
+
+          try:
+              with open(SOLUTIONS_FILE) as f:
+                  raw = json.load(f)
+          except json.JSONDecodeError as e:
+              print(f'::error::{SOLUTIONS_FILE}: invalid JSON — {e}')
+              sys.exit(1)
+
+          solutions = raw.get('solutions', [])
+          if not solutions:
+              errors.append(f'{SOLUTIONS_FILE}: "solutions" array is empty or missing')
+
+          solution_names = {s.get('name') for s in solutions if s.get('name')}
+          deploy_orders  = []
+
+          for sol in solutions:
+              name = sol.get('name', '<unnamed>')
+
+              for field in ('name', 'folder', 'deployOrder', 'deploymentSettings'):
+                  if field not in sol:
+                      errors.append(f'[{name}] Missing required field: "{field}"')
+
+              folder = sol.get('folder', '')
+              if folder and not os.path.isdir(folder):
+                  errors.append(f'[{name}] folder "{folder}" does not exist')
+
+              deploy_order = sol.get('deployOrder')
+              if deploy_order is not None:
+                  if not isinstance(deploy_order, int) or deploy_order < 1:
+                      errors.append(f'[{name}] deployOrder must be a positive integer, got: {deploy_order!r}')
+                  elif deploy_order in deploy_orders:
+                      errors.append(f'[{name}] deployOrder {deploy_order} is a duplicate')
+                  else:
+                      deploy_orders.append(deploy_order)
+
+              for dep in sol.get('dependsOn', []):
+                  if dep not in solution_names:
+                      warnings.append(f'[{name}] dependsOn "{dep}" is not declared in solutions.json')
+
+              schema_file = sol.get('dataSchemaFile', '')
+              if schema_file:
+                  if not os.path.isfile(schema_file):
+                      errors.append(f'[{name}] dataSchemaFile "{schema_file}" does not exist')
+                  else:
+                      try:
+                          ET.parse(schema_file)
+                      except ET.ParseError as e:
+                          errors.append(f'[{name}] dataSchemaFile "{schema_file}" is not valid XML: {e}')
+
+              settings = sol.get('deploymentSettings', {})
+              if not isinstance(settings, dict):
+                  errors.append(f'[{name}] deploymentSettings must be an object')
+                  continue
+
+              for env_name, path in settings.items():
+                  if not path:
+                      warnings.append(f'[{name}/{env_name}] deploymentSettings path is empty')
+                      continue
+
+                  expected_prefix = f'src/solutions/{name}/'
+                  if not path.startswith(expected_prefix):
+                      warnings.append(
+                          f'[{name}/{env_name}] deploymentSettings path "{path}" does not follow '
+                          f'the convention src/solutions/{name}/deployment-settings-{env_name}.json'
+                      )
+
+                  if not os.path.isfile(path):
+                      errors.append(f'[{name}/{env_name}] deploymentSettings file "{path}" does not exist')
+                      continue
+
+                  try:
+                      with open(path) as f:
+                          ds = json.load(f)
+                  except json.JSONDecodeError as e:
+                      errors.append(f'[{name}/{env_name}] "{path}": invalid JSON — {e}')
+                      continue
+
+                  for key in ('EnvironmentVariables', 'ConnectionReferences'):
+                      if key not in ds:
+                          warnings.append(f'[{name}/{env_name}] "{path}": missing "{key}" array (will default to empty)')
+                      elif not isinstance(ds[key], list):
+                          errors.append(f'[{name}/{env_name}] "{path}": "{key}" must be an array')
+
+                  ds_str = open(path).read()
+                  for token in re.findall(r'#\{([^}]+)\}#', ds_str):
+                      warnings.append(
+                          f'[{name}/{env_name}] "{path}": token "#{{{token}}}#" — '
+                          f'ensure "{token}" is in Azure Key Vault or as a GitHub Variable'
+                      )
+
+          if os.path.isfile(PROJ_VARS_FILE):
+              try:
+                  with open(PROJ_VARS_FILE) as f:
+                      proj = yaml.safe_load(f)
+              except yaml.YAMLError as e:
+                  errors.append(f'{PROJ_VARS_FILE}: invalid YAML — {e}')
+                  proj = None
+
+              if proj and isinstance(proj.get('variables'), dict):
+                  for key in PROTECTED_KEYS:
+                      if key in proj['variables']:
+                          errors.append(
+                              f'{PROJ_VARS_FILE}: contains protected key "{key}" — '
+                              f'will cause pipeline failure at runtime'
+                          )
+
+                  CRED_PATTERNS = re.compile(r'(password|secret|token|key|apikey|pwd)', re.IGNORECASE)
+                  for k, v in proj['variables'].items():
+                      if CRED_PATTERNS.search(k) and v and str(v).strip():
+                          warnings.append(
+                              f'{PROJ_VARS_FILE}: variable "{k}" looks like a credential — '
+                              f'secrets must live in Azure Key Vault, not in this file'
+                          )
+          else:
+              warnings.append(f'{PROJ_VARS_FILE} not found — using global defaults from GHA-CICD-Core')
+
+          for w in warnings:
+              print(f'::warning::{w}')
+
+          if errors:
+              print(f'::error::Found {len(errors)} error(s) — fix all errors before merging:')
+              for e in errors:
+                  print(f'::error::{e}')
+              sys.exit(1)
+          else:
+              print(f'✅ Linted {len(solutions)} solution(s) — {len(warnings)} warning(s), 0 errors')
+
+      - name: Write lint summary
+        if: always()
+        shell: python
+        run: |
+          import json, os
+
+          solutions_count = 0
+          try:
+              with open('solutions.json') as f:
+                  data = json.load(f)
+              solutions_count = len(data.get('solutions', []))
+          except Exception:
+              pass
+
+          outcome = '${{ steps.lint.outcome }}'
+          icon    = '✅' if outcome == 'success' else '❌'
+
+          summary = f"""## {icon} Config Lint
+
+          | Check | Value |
+          |---|---|
+          | solutions.json | {solutions_count} solution(s) |
+          | Result | **{outcome.upper()}** |
+          | Triggered by | ${{ github.actor }} |
+          | Branch | ${{ github.head_ref || github.ref_name }} |
+
+          """
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(summary)
+
+      # ── Runtime validate: env URLs, Azure OIDC vars, secrets ──────────────────
+      - name: Validate runtime config
         shell: pwsh
         run: |
           $isMock = '${{ inputs.mock_deploy }}' -eq 'true'

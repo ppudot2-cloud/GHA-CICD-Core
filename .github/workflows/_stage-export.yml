@@ -6,12 +6,16 @@
 # skip_export=false (default — sandbox export mode):
 #   Fans out per solution (parallel) and for each solution:
 #   1. reveille         – checkout, Azure OIDC login, AKV secrets, merge vars
-#   2. pac-install     – install PAC CLI
-#   3. export-solution – export unmanaged ZIP from sandbox, unpack to source tree
-#   4. upload-artifact – upload unpacked source as exported-source-<name> artifact
+#   2. pac-install      – install PAC CLI
+#   3. export-solution  – export unmanaged ZIP from sandbox, unpack to source tree
+#   4. upload-artifact  – upload unpacked source as exported-source-<name> artifact
 #   Then the commit job:
 #   5. commit – create feature/pipeline-{run_number} from origin/main, copy
 #               exported source, write pipeline-context.json, push to origin.
+#
+# NOTE: Lint and runtime config validation are intentionally NOT in this stage.
+#   They run as the first job in _stage-build.yml (before any build work begins),
+#   so all checks are consolidated into one "Lint + Validate Pipeline Config" gate.
 #
 # skip_export=true (manual export mode):
 #   The per-solution export jobs are SKIPPED. The user has already exported,
@@ -83,22 +87,6 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # lint  —  runs in parallel with export; both must succeed before commit.
-  #
-  # Validates solutions.json, deployment-settings paths, project-vars.yml
-  # protected keys, and unresolved #{TOKEN}# placeholders.
-  # ─────────────────────────────────────────────────────────────────────────────
-  lint:
-    name: "🔍 Lint Pipeline Config"
-    permissions:
-      contents: read
-      pull-requests: write
-    uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/_reusable-lint.yml@main
-    with:
-      solutions_json_path: 'solutions.json'
-      project_vars_path:   '.github/config/project-vars.yml'
-
   export:
     name: "📤 Export | ${{ matrix.solution.name }}"
     runs-on: ubuntu-latest
@@ -165,10 +153,10 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   commit:
     name: "📤 Commit pipeline context"
-    needs: [lint, export]
-    # Run when lint passed AND export either succeeded or was skipped (skip_export=true).
-    # If lint failed we do NOT commit — bad config should not proceed.
-    if: needs.lint.result == 'success' && (needs.export.result == 'success' || needs.export.result == 'skipped')
+    needs: [export]
+    # Run when export succeeded or was skipped (skip_export=true).
+    # Lint + runtime config validation now runs in the Build stage before any build work begins.
+    if: needs.export.result == 'success' || needs.export.result == 'skipped'
     runs-on: ubuntu-latest
     permissions:
       contents: write
