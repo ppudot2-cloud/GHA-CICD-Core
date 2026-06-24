@@ -55,7 +55,10 @@ runs:
         set -euo pipefail
 
         # ── 1. Remove any broken existing installation ────────────────────────
+        # Uninstall via dotnet AND scrub the tool store directory to prevent
+        # "failed to update" errors caused by leftover store metadata.
         dotnet tool uninstall --global microsoft.powerapps.cli.tool 2>/dev/null || true
+        rm -rf "$HOME/.dotnet/tools/.store/microsoft.powerapps.cli.tool" 2>/dev/null || true
 
         # ── 2. Resolve latest version from NuGet ─────────────────────────────
         PAC_VER=$(curl -fsSL \
@@ -78,17 +81,14 @@ runs:
 
         # ── 4. Inject DotnetToolSettings.xml (the missing file) ───────────────
         # The file tells dotnet tool install: command name = pac, entry DLL = pac.dll
-        # We write it to a temp location then add it to the existing zip archive.
         cat > "$WORK/DotnetToolSettings.xml" << 'XML'
-        <?xml version="1.0" encoding="utf-8"?>
-        <DotNetCliTool Version="1">
-          <Commands>
-            <Command Name="pac" EntryPoint="pac.dll" Runner="dotnet" />
-          </Commands>
-        </DotNetCliTool>
-        XML
-        # Normalise indentation — leading spaces inside heredoc must be stripped
-        sed -i 's/^        //' "$WORK/DotnetToolSettings.xml"
+<?xml version="1.0" encoding="utf-8"?>
+<DotNetCliTool Version="1">
+  <Commands>
+    <Command Name="pac" EntryPoint="pac.dll" Runner="dotnet" />
+  </Commands>
+</DotNetCliTool>
+XML
         # Add into the zip at the root level (nupkg = zip)
         (cd "$WORK" && zip pac.nupkg DotnetToolSettings.xml)
 
@@ -101,8 +101,21 @@ runs:
         printf '{"sdk":{"version":"8.0.0","rollForward":"latestMinor"}}' \
           > "$WORK/global.json"
 
+        # nuget.config clears ALL sources so dotnet uses ONLY our patched local
+        # feed — without this, --add-source still allows dotnet to resolve from
+        # NuGet.org and fetch the unpatched package, ignoring our local copy.
+        cat > "$WORK/nuget.config" << EOF
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="local-patched" value="${WORK}/local-feed" />
+  </packageSources>
+</configuration>
+EOF
+
         (cd "$WORK" && dotnet tool install --global \
-          --add-source "$WORK/local-feed" \
+          --configfile "$WORK/nuget.config" \
           microsoft.powerapps.cli.tool \
           --version "$PAC_VER")
 
