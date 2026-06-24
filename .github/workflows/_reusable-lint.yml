@@ -2,7 +2,7 @@
 # REUSABLE WORKFLOW: Lint and Validate Pipeline Configuration
 # =============================================================================
 #
-# LOCATION: GHA-Core (this file). Called from GHA-Dynamics build-and-deploy.yml.
+# LOCATION: GHA-CICD-Core (this file). Called from GHA-Dynamics build-and-deploy.yml.
 #
 # PURPOSE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -227,7 +227,7 @@ jobs:
                               f'secrets must live in Azure Key Vault, not in this file'
                           )
           else:
-              warnings.append(f'{PROJ_VARS_FILE} not found — using global defaults from GHA-Core')
+              warnings.append(f'{PROJ_VARS_FILE} not found — using global defaults from GHA-CICD-Core')
 
           # ──────────────────────────────────────────────────────────────────
           # 4. Output results

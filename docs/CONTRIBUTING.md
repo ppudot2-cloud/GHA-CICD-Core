@@ -1,6 +1,6 @@
-# Contributing to GHA-Core
+# Contributing to GHA-CICD-Core
 
-> GHA-Core is the shared CI/CD library consumed by every Power Platform project in the organisation. Changes here affect **all downstream pipelines simultaneously.** Please read this guide fully before making changes.
+> GHA-CICD-Core is the shared CI/CD library consumed by every Power Platform project in the organisation. Changes here affect **all downstream pipelines simultaneously.** Please read this guide fully before making changes.
 
 ---
 
@@ -25,7 +25,7 @@
 |---|---|
 | Platform Engineering | All changes — workflows, actions, scripts, docs |
 | DevSecOps | Security-related changes — `reveille`, `Merge-Variables.ps1`, `global-vars.yml` |
-| Project teams (GHA-Dynamics owners) | Documentation suggestions only — raise an issue; do not modify GHA-Core directly |
+| Project teams (GHA-Dynamics owners) | Documentation suggestions only — raise an issue; do not modify GHA-CICD-Core directly |
 | External contractors | Issues and documentation only — no code changes without platform engineering review |
 
 All PRs require **at least one approval** from a Platform Engineering team member. Changes to `reveille/action.yml`, `Merge-Variables.ps1`, or `global-vars.yml` require **two approvals** (one must be DevSecOps).
@@ -35,7 +35,7 @@ All PRs require **at least one approval** from a Platform Engineering team membe
 ## 2. Repo Structure at a Glance
 
 ```
-GHA-Core/
+GHA-CICD-Core/
 ├── .github/
 │   ├── workflows/          # Reusable workflows — called via `uses: ...@<tag>`
 │   ├── actions/dynamics/   # Composite actions — called inside steps
@@ -48,7 +48,7 @@ GHA-Core/
 └── README.md
 ```
 
-The `reveille` action checks out GHA-Core to `.ci/` on every runner. Changes to `actions/` and `scripts/` take effect on the **next pipeline run** for any caller. Callers that are pinned to a tag are **insulated** from live changes until they update their pin.
+The `reveille` action checks out GHA-CICD-Core to `.ci/` on every runner. Changes to `actions/` and `scripts/` take effect on the **next pipeline run** for any caller. Callers that are pinned to a tag are **insulated** from live changes until they update their pin.
 
 ---
 
@@ -77,7 +77,7 @@ The quickest way to validate a change is to run the full pipeline simulation loc
 
 ```bash
 # Clone both repos as siblings
-git clone https://github.com/YOUR_ORG/GHA-Core
+git clone https://github.com/YOUR_ORG/GHA-CICD-Core
 git clone https://github.com/YOUR_ORG/GHA-Dynamics
 
 # Full simulation — every stage
@@ -107,7 +107,7 @@ Pipeline simulation complete ✅
 The ServiceNow module has Pester unit tests:
 
 ```powershell
-cd GHA-Core
+cd GHA-CICD-Core
 Invoke-Pester .github/servicenow/Tests/ -Output Detailed
 ```
 
@@ -121,11 +121,11 @@ Run `simulate-pipeline.py` as shown in §3. This catches: broken PowerShell synt
 
 ### Level 2 — Mock pipeline run (required for action/workflow changes)
 
-Push your feature branch to GHA-Core. Then, in a **test GHA-Dynamics repo** (not a production project repo), temporarily update the `uses:` references to point at your branch:
+Push your feature branch to GHA-CICD-Core. Then, in a **test GHA-Dynamics repo** (not a production project repo), temporarily update the `uses:` references to point at your branch:
 
 ```yaml
 # In your test GHA-Dynamics repo — NEVER commit this to a production caller
-uses: YOUR_ORG/GHA-Core/.github/workflows/_stage-build.yml@your-feature-branch
+uses: YOUR_ORG/GHA-CICD-Core/.github/workflows/_stage-build.yml@your-feature-branch
 ```
 
 Dispatch `build-and-deploy.yml` with `mock_deploy: true`. All stages should complete successfully with `[MOCK]` indicators on every step.
@@ -194,7 +194,7 @@ This is enforced via GitHub CODEOWNERS (see `.github/CODEOWNERS`).
 
 ## 6. Release Process and Versioning
 
-GHA-Core uses **semantic versioning**: `vMAJOR.MINOR.PATCH`.
+GHA-CICD-Core uses **semantic versioning**: `vMAJOR.MINOR.PATCH`.
 
 | Version bump | When |
 |---|---|
@@ -224,13 +224,13 @@ git push origin v1.2.0
 After tagging, send a message to all GHA-Dynamics project owners:
 
 ```
-GHA-Core v1.2.0 has been released.
+GHA-CICD-Core v1.2.0 has been released.
 
 Breaking changes: None.
 New features: [list]
 To update: change @main to @v1.2.0 in your workflow uses: references.
 
-Changelog: https://github.com/YOUR_ORG/GHA-Core/blob/main/CHANGELOG.md
+Changelog: https://github.com/YOUR_ORG/GHA-CICD-Core/blob/main/CHANGELOG.md
 ```
 
 ### Recommended ref for callers
@@ -239,17 +239,17 @@ Callers should pin to a release tag, not `@main`:
 
 ```yaml
 # ✅ Pinned to a release tag — insulated from breaking changes
-uses: YOUR_ORG/GHA-Core/.github/workflows/_stage-build.yml@v1.2.0
+uses: YOUR_ORG/GHA-CICD-Core/.github/workflows/_stage-build.yml@v1.2.0
 
 # ⚠️ @main — receives all changes immediately, including breaking ones
-uses: YOUR_ORG/GHA-Core/.github/workflows/_stage-build.yml@main
+uses: YOUR_ORG/GHA-CICD-Core/.github/workflows/_stage-build.yml@main
 ```
 
 For maximum immutability (recommended for production), pin to a commit SHA:
 
 ```yaml
 # ✅ Maximum immutability — requires explicit SHA update
-uses: YOUR_ORG/GHA-Core/.github/workflows/_stage-build.yml@abc123def456
+uses: YOUR_ORG/GHA-CICD-Core/.github/workflows/_stage-build.yml@abc123def456
 ```
 
 ---
@@ -346,7 +346,7 @@ When removing a feature that is currently used:
 
 ## 10. What NOT to Change Here
 
-These concerns belong in the GHA-Dynamics project repo, **not** GHA-Core:
+These concerns belong in the GHA-Dynamics project repo, **not** GHA-CICD-Core:
 
 | Concern | Where it lives |
 |---|---|
@@ -358,4 +358,4 @@ These concerns belong in the GHA-Dynamics project repo, **not** GHA-Core:
 | GitHub Environments and approval gate configuration | GHA-Dynamics Settings |
 | GitHub Secrets and Variables (`AZURE_*`, `PP_*_URL`) | GHA-Dynamics Settings |
 
-If you find yourself wanting to add project-specific logic to GHA-Core, it almost certainly belongs in a new input/variable exposed by the relevant action or workflow — not hardcoded here.
+If you find yourself wanting to add project-specific logic to GHA-CICD-Core, it almost certainly belongs in a new input/variable exposed by the relevant action or workflow — not hardcoded here.

@@ -1,0 +1,15 @@
+{
+  "EnvironmentVariables": [
+    {
+      "SchemaName": "new_ExampleVariable",
+      "Value": "placeholder-{{ENV_TITLE}}"
+    }
+  ],
+  "ConnectionReferences": [
+    {
+      "LogicalName": "new_ExampleDataverse_00000",
+      "ConnectionId": "#{{{ENV_UPPER}}_DataverseConnectionId}#",
+      "ConnectorId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps"
+    }
+  ]
+}

@@ -2,13 +2,13 @@
 # WORKFLOW: Manual Rollback — Restore a Previous Solution Version
 # =============================================================================
 #
-# LOCATION: GHA-Core (this file). All rollback logic lives here.
+# LOCATION: GHA-CICD-Core (this file). All rollback logic lives here.
 #
 # WHY IT LIVES IN CORE
 # ─────────────────────────────────────────────────────────────────────────────
 # Rollback is a shared platform capability, not a project-specific workflow.
 # This workflow is the single implementation — any GHA-Dynamics project triggers
-# it directly from GHA-Core's Actions tab.
+# it directly from GHA-CICD-Core's Actions tab.
 #
 # AUTOMATIC ROLLBACK vs MANUAL ROLLBACK
 # ─────────────────────────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@
 #
 # HOW TO TRIGGER
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. Go to GHA-Core → Actions tab → "Rollback" → Run workflow
+# 1. Go to GHA-CICD-Core → Actions tab → "Rollback" → Run workflow
 # 2. Fill in all inputs (see descriptions below)
 # 3. The environment_url input must match the target PP environment URL
 #    (copy from the GHA-Dynamics repo's Variables: PP_DEV_URL, PP_UAT_URL, etc.)
@@ -160,7 +160,7 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout GHA-Core
+      - name: Checkout GHA-CICD-Core
         uses: actions/checkout@v4
         with:
           path: .ci

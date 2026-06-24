@@ -1,4 +1,4 @@
-# GHA-Core — Power Platform CI/CD Reusable Library
+# GHA-CICD-Core — Power Platform CI/CD Reusable Library
 
 Shared GitHub Actions library for Power Platform pipelines. Contains all reusable workflows, composite actions, and PowerShell scripts. Called by [GHA-Dynamics](https://github.com/ppudot2-cloud/GHA-Dynamics) project repos.
 
@@ -9,7 +9,7 @@ Shared GitHub Actions library for Power Platform pipelines. Contains all reusabl
 ## Structure
 
 ```
-GHA-Core/
+GHA-CICD-Core/
 ├── .github/
 │   ├── workflows/                  # Reusable workflows (MUST be at root — GitHub constraint)
 │   │   ├── _job-build.yml          # Single-solution build job
@@ -67,9 +67,9 @@ GHA-Core/
 
 ## How callers use this repo
 
-1. `reveille` checks out GHA-Core to `.ci/` on every runner using `GHA_CORE_PAT`, then performs Azure OIDC login, fetches AKV secrets, and merges pipeline variables
-2. Workflows are called via `uses: ppudot2-cloud/GHA-Core/.github/workflows/{name}@main`
-3. Actions are called via `uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/{name}@main`
+1. `reveille` checks out GHA-CICD-Core to `.ci/` on every runner using `GHA_CORE_PAT`, then performs Azure OIDC login, fetches AKV secrets, and merges pipeline variables
+2. Workflows are called via `uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/{name}@main`
+3. Actions are called via `uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/{name}@main`
 4. Scripts are called via `& .ci/.github/scripts/dynamics/{Script}.ps1`
 
 ---
@@ -95,4 +95,4 @@ All documentation lives in [`docs/`](docs/) — this is the single authoritative
 | [RUNBOOKS.md](docs/RUNBOOKS.md) | On-call / Release Mgr | Operational runbooks — stuck pipelines, manual rollback, ServiceNow recovery, break-glass deploy, credential rotation |
 | [gha_cicd_e2e_flow.html](docs/gha_cicd_e2e_flow.html) | All | Interactive end-to-end pipeline flow diagram |
 
-See also: [CONTRIBUTING.md](./CONTRIBUTING.md) — how to develop, test, and release changes to GHA-Core. [CHANGELOG.md](./CHANGELOG.md) — version history.
+See also: [CONTRIBUTING.md](./CONTRIBUTING.md) — how to develop, test, and release changes to GHA-CICD-Core. [CHANGELOG.md](./CHANGELOG.md) — version history.

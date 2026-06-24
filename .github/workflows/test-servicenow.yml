@@ -86,9 +86,9 @@ jobs:
           Write-Host "        ✓ Checked out @ ${{ github.sha }}"
 
           Write-Host ""
-          Write-Host "  [2/6] Checkout GHA-Core CI scripts → .ci/"
+          Write-Host "  [2/6] Checkout GHA-CICD-Core CI scripts → .ci/"
           Start-Sleep -Milliseconds 500
-          Write-Host "        ✓ GHA-Core @ main checked out"
+          Write-Host "        ✓ GHA-CICD-Core @ main checked out"
 
           Write-Host ""
           Write-Host "  [3/6] Azure OIDC Login"

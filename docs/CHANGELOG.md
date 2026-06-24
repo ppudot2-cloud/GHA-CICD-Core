@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to GHA-Core are documented here.
+All notable changes to GHA-CICD-Core are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -31,11 +31,11 @@ New output on `_stage-deploy-chain.yml`: `uat_result` — exposes the result of 
 
 **Architecture — Azure identity inputs now passed explicitly from callers**
 
-All four Azure identity values (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_KEY_VAULT_NAME`) are no longer read via `vars.*` inside GHA-Core reusable workflows. They are now declared as explicit `workflow_call` inputs (`azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`) on every workflow that calls `reveille`.
+All four Azure identity values (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_KEY_VAULT_NAME`) are no longer read via `vars.*` inside GHA-CICD-Core reusable workflows. They are now declared as explicit `workflow_call` inputs (`azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, `azure_key_vault_name`) on every workflow that calls `reveille`.
 
 Affected workflows: `_stage-export.yml`, `_stage-build.yml`, `_job-build.yml`, `_stage-deploy-chain.yml`.
 
-**Why:** `vars.*` in a reusable workflow resolves from the repo that *defines* the workflow (GHA-Core), not the repo that calls it. Storing these values in GHA-Core would couple the shared library to a specific project's Azure identity — violating the design principle that GHA-Core is project-agnostic.
+**Why:** `vars.*` in a reusable workflow resolves from the repo that *defines* the workflow (GHA-CICD-Core), not the repo that calls it. Storing these values in GHA-CICD-Core would couple the shared library to a specific project's Azure identity — violating the design principle that GHA-CICD-Core is project-agnostic.
 
 **Migration for new callers:** Pass these four inputs explicitly in every `with:` block that calls an affected reusable:
 ```yaml
@@ -176,7 +176,7 @@ Initial stable release. All features documented in this release were present bef
 - `docs/ENTERPRISE_IMPLEMENTATION_GUIDE.md` — step-by-step production rollout
 - `docs/SECRETS_SETUP_GUIDE.md` — secrets, variables, and environment configuration quick reference
 - `docs/RUNBOOKS.md` — operational runbooks: break-glass, manual rollback, credential rotation, ServiceNow recovery
-- `CONTRIBUTING.md` — development, testing, and release process for GHA-Core contributors
+- `CONTRIBUTING.md` — development, testing, and release process for GHA-CICD-Core contributors
 - `CHANGELOG.md` — this file
 
 ### Security

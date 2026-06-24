@@ -1,0 +1,61 @@
+# =============================================================================
+# PROJECT VARIABLES — {{PROJECT_NAME}}
+# =============================================================================
+# These variables are specific to this project and supplement the global
+# variables defined in GHA-CICD-Core/.github/variables/dynamics/global-vars.yml.
+#
+# GOVERNANCE RULES:
+#   • Variables listed in global-vars.yml → protected_keys CANNOT appear here.
+#   • Merge-Variables.ps1 will exit 1 with a clear error if a violation is found.
+#   • All other global defaults can be overridden here.
+#
+# SENSITIVE VALUES:
+#   Do NOT store secrets (tokens, passwords, connection strings) here.
+#   Secrets live exclusively in Azure Key Vault. This file is source-controlled
+#   and visible to anyone with repo access.
+#
+# PROJECT-LEVEL AZURE IDENTITY (set as GitHub Variables, NOT in this file):
+#   These are non-sensitive resource identifiers — store them in GitHub repository
+#   Variables (Settings → Secrets and variables → Actions → Variables):
+#
+#   AZURE_CLIENT_ID       — App Registration Client ID for this project's SPN
+#   AZURE_TENANT_ID       — Azure AD Tenant ID for this project
+#   AZURE_SUBSCRIPTION_ID — Azure Subscription ID
+#   AZURE_KEY_VAULT_NAME  — Name of this project's Azure Key Vault
+#
+#   Each project has its own Key Vault and App Registration. This lets you rotate
+#   credentials and scope access independently per project.
+#
+# HOW ENVIRONMENT URLS ARE USED:
+#   These URLs are passed as inputs to the reusable workflows. The thin wrapper
+#   workflows read these values from GitHub repository variables (vars.*) and
+#   forward them as explicit `with:` inputs to GHA-CICD-Core.
+# =============================================================================
+
+variables:
+  # ── Power Platform environment URLs ────────────────────────────────────────
+  # Replace with your actual Dataverse environment URLs.
+  # Format: https://{org-name}.crm.dynamics.com (or .crm{N}.dynamics.com for non-US)
+  PP_DEV_URL:  "https://cicd-dev.crm.dynamics.com"
+  PP_INTG_URL: "https://cicd-intg.crm.dynamics.com"
+  PP_UAT_URL:  "https://cicd-uat.crm.dynamics.com"
+  PP_FRS_URL:  "https://cicd-frs.crm.dynamics.com"
+  PP_PERF_URL: "https://cicd-perf.crm.dynamics.com"
+  PP_PROD_URL: "https://cicd-prod.crm.dynamics.com"
+  PP_SDBX_URL: "https://cicd-sdbx.crm.dynamics.com"
+
+  # ── Project solution ────────────────────────────────────────────────────────
+  PP_SOLUTION_NAME:     "{{SOLUTION_NAME}}"
+  PP_DATA_SCHEMA_FILE:  ""   # leave blank to skip config data export
+
+  # ── Base solutions for version-compare (used when enable_version_compare=true) ─
+  # Comma-separated list of solution unique names that must be present in the
+  # previous environment before deploying this project's solutions.
+  # Example: "nfBase,nfCustomizations,nfShared"
+  # Leave empty to skip base-solution checks.
+  PP_BASE_SOLUTIONS:    ""
+
+  # ── Deployment behaviour overrides (non-protected globals) ─────────────────
+  # Uncomment and adjust only if this project genuinely needs different defaults.
+  # SOLUTION_IMPORT_MAX_WAIT_MINUTES: "90"   # longer timeout for large solutions
+  # MOCK_DEPLOY: "false"                     # override for testing

@@ -1,0 +1,156 @@
+# =============================================================================
+# WORKFLOW: Onboard Project
+# =============================================================================
+# Bootstraps a new project repo from GHA-CICD-Core templates with a single click.
+#
+# OPERATIONS
+# ─────────────────────────────────────────────────────────────────────────────
+#   new_project  — Scaffolds all pipeline files (workflows, config, solutions.json)
+#                  plus the first solution's source stubs in the target repo.
+#                  Run once per project.
+#
+#   add_solution — Adds a new solution's source stubs to an existing project repo
+#                  and updates solutions.json with the new entry.
+#                  Run once per additional solution.
+#
+# PREREQUISITES
+# ─────────────────────────────────────────────────────────────────────────────
+#   • Target repository must already exist (create it first, then run this)
+#   • GHATOKEN secret must have repo scope on the target repository
+#
+# AFTER RUNNING
+# ─────────────────────────────────────────────────────────────────────────────
+#   A PR is opened in the target repo with a complete setup checklist.
+#   Review it, update placeholder values, then follow the checklist steps.
+# =============================================================================
+
+name: Onboard Project
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: 'Target repository in org/repo format (e.g. my-org/MyProject)'
+        required: true
+        type: string
+
+      operation:
+        description: 'Operation: scaffold full project (new_project) or add a solution to existing repo (add_solution)'
+        required: true
+        default: 'new_project'
+        type: choice
+        options:
+          - new_project
+          - add_solution
+
+      solution_name:
+        description: 'Power Platform solution unique name (exact match with PP environment, e.g. CoreSolution)'
+        required: true
+        type: string
+
+      deploy_order:
+        description: 'Deploy sequence position — 1 deploys first; increment for each additional solution'
+        required: false
+        default: '1'
+        type: string
+
+      depends_on:
+        description: 'Comma-separated prerequisite solution names (blank = none, e.g. CoreSolution,SharedBase)'
+        required: false
+        default: ''
+        type: string
+
+      gha_core_ref:
+        description: 'GHA-CICD-Core ref to pin in generated workflows (v1 = stable, main = latest)'
+        required: false
+        default: 'v1'
+        type: string
+
+      notification_email:
+        description: 'Email address for pipeline failure notifications'
+        required: true
+        type: string
+
+jobs:
+  onboard:
+    name: "🚀 Onboard | ${{ inputs.target_repo }}"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      pr_url: ${{ steps.run.outputs.pr_url }}
+      branch: ${{ steps.run.outputs.branch }}
+
+    steps:
+      - name: Checkout GHA-CICD-Core (for templates and scripts)
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        shell: pwsh
+        run: |
+          $repo = '${{ inputs.target_repo }}'
+          if (-not ($repo -match '^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$')) {
+            Write-Error "::error::target_repo must be in org/repo format (e.g. my-org/MyProject). Got: $repo"
+            exit 1
+          }
+
+          $sol = '${{ inputs.solution_name }}'
+          if (-not ($sol -match '^[a-zA-Z][a-zA-Z0-9_]*$')) {
+            Write-Error "::error::solution_name must be a valid PP solution unique name (letters, digits, underscores; start with a letter). Got: $sol"
+            exit 1
+          }
+
+          $order = '${{ inputs.deploy_order }}'
+          if (-not ($order -match '^\d+$') -or [int]$order -lt 1) {
+            Write-Error "::error::deploy_order must be a positive integer. Got: $order"
+            exit 1
+          }
+
+          $email = '${{ inputs.notification_email }}'
+          if (-not ($email -match '^[^@]+@[^@]+\.[^@]+$')) {
+            Write-Error "::error::notification_email must be a valid email address. Got: $email"
+            exit 1
+          }
+
+          Write-Host "✅ Inputs validated"
+          Write-Host "   target_repo        : $repo"
+          Write-Host "   operation          : ${{ inputs.operation }}"
+          Write-Host "   solution_name      : $sol"
+          Write-Host "   deploy_order       : $order"
+          Write-Host "   depends_on         : '${{ inputs.depends_on }}'"
+          Write-Host "   gha_core_ref       : ${{ inputs.gha_core_ref }}"
+          Write-Host "   notification_email : $email"
+
+      - name: Run onboarding script
+        id: run
+        shell: pwsh
+        env:
+          GH_TOKEN:     ${{ secrets.GHATOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          ./.github/scripts/dynamics/New-Project.ps1 `
+            -TargetRepo         '${{ inputs.target_repo }}' `
+            -Operation          '${{ inputs.operation }}' `
+            -SolutionName       '${{ inputs.solution_name }}' `
+            -DeployOrder        '${{ inputs.deploy_order || '1' }}' `
+            -DependsOn          '${{ inputs.depends_on }}' `
+            -GhaCoreRef         '${{ inputs.gha_core_ref || 'v1' }}' `
+            -NotificationEmail  '${{ inputs.notification_email }}' `
+            -TemplatesPath      '.github/templates'
+
+      - name: Summary
+        shell: bash
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🚀 Onboarding Complete
+
+          | Field | Value |
+          |-------|-------|
+          | Target repo | \`${{ inputs.target_repo }}\` |
+          | Operation | \`${{ inputs.operation }}\` |
+          | Solution | \`${{ inputs.solution_name }}\` |
+          | GHA-CICD-Core ref | \`${{ inputs.gha_core_ref || 'v1' }}\` |
+          | Pull Request | ${{ steps.run.outputs.pr_url }} |
+
+          **Next step:** Open the PR and follow the setup checklist to complete onboarding.
+          EOF

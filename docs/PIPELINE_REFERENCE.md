@@ -1,4 +1,4 @@
-# Pipeline Reference — GHA-Core + GHA-Dynamics
+# Pipeline Reference — GHA-CICD-Core + GHA-Dynamics
 ## Complete guide to every workflow, action, script, and config file
 
 > This document is the single source of truth for what every component in the pipeline does.
@@ -14,7 +14,7 @@
    - [deploy-prod.yml — Pipeline 2](#deploy-prodyml--pipeline-2)
    - [export-solution.yml — Standalone Export](#export-solutionyml--standalone-export)
    - [test-servicenow.yml — ServiceNow Flow Simulation](#test-servicenowyml--servicenow-flow-simulation)
-2. [GHA-Core Reusable Workflows](#2-gha-core-reusable-workflows)
+2. [GHA-CICD-Core Reusable Workflows](#2-gha-core-reusable-workflows)
    - [_stage-export.yml](#_stage-exportyml)
    - [_stage-build.yml](#_stage-buildyml)
    - [_job-build.yml](#_job-buildyml)
@@ -23,7 +23,7 @@
    - [_reusable-lint.yml — Config Linter (new)](#_reusable-lintyml--config-linter)
    - [rollback.yml — Manual Rollback (new)](#rollbackyml--manual-rollback)
    - [pipeline-test.yml — Pipeline Integration Test (new)](#pipeline-testyml--pipeline-integration-test)
-3. [GHA-Core Composite Actions](#3-gha-core-composite-actions)
+3. [GHA-CICD-Core Composite Actions](#3-gha-core-composite-actions)
    - [reveille](#reveille)
    - [pac-install](#pac-install)
    - [servicenow-change](#servicenow-change)
@@ -37,7 +37,7 @@
    - [post-deploy](#post-deploy)
    - [verify-deployment](#verify-deployment)
    - [jfrog-upload](#jfrog-upload)
-4. [GHA-Core PowerShell Scripts](#4-gha-core-powershell-scripts)
+4. [GHA-CICD-Core PowerShell Scripts](#4-gha-core-powershell-scripts)
 5. [Configuration Files](#5-configuration-files)
 6. [Deployment Settings](#6-deployment-settings)
 7. [Variable Files](#7-variable-files)
@@ -46,7 +46,7 @@
 
 ## 1. GHA-Dynamics Workflows
 
-These are the entry-point workflows — the ones you trigger or that fire automatically. All business logic is delegated to GHA-Core.
+These are the entry-point workflows — the ones you trigger or that fire automatically. All business logic is delegated to GHA-CICD-Core.
 
 ### `build-and-deploy.yml` — Pipeline 1
 
@@ -64,7 +64,7 @@ These are the entry-point workflows — the ones you trigger or that fire automa
 | `checker_error_level` | choice | `HighIssue` | Minimum severity that fails Solution Checker |
 | `base_solutions` | string | `''` | Comma-separated base solution names to verify are installed (informational only — never blocks) |
 | `run_pr_validation` | boolean | false | Run a build + Solution Checker check before the full pipeline. Always true on push events. |
-| `run_pipeline_tests` | boolean | false | Run the full `GHA-Core pipeline-test.yml` mock suite before proceeding. Adds ~5 min; use when testing Core changes. |
+| `run_pipeline_tests` | boolean | false | Run the full `GHA-CICD-Core pipeline-test.yml` mock suite before proceeding. Adds ~5 min; use when testing Core changes. |
 
 > **Rollback:** Controlled by `ENABLE_ROLLBACK` GitHub Environment variable (set per environment — Dev, Intg, UAT, FRS, Perf, Prod). When `true`, the pipeline takes a pre-import backup and auto-restores on failure. There is no `enable_backup` dispatch input — rollback behaviour is always driven by the environment variable.
 
@@ -75,9 +75,9 @@ These are the entry-point workflows — the ones you trigger or that fire automa
 setup
   → [optional] pr-validation     (push event OR run_pr_validation=true)
   → [optional] pipeline-tests    (run_pipeline_tests=true)
-  → lint-config                  (calls GHA-Core _reusable-lint.yml — failure blocks export)
-  → stage-export                 (calls GHA-Core _stage-export.yml)
-  → stage-build                  (calls GHA-Core _stage-build.yml)
+  → lint-config                  (calls GHA-CICD-Core _reusable-lint.yml — failure blocks export)
+  → stage-export                 (calls GHA-CICD-Core _stage-export.yml)
+  → stage-build                  (calls GHA-CICD-Core _stage-build.yml)
   → stage-deploy  (single call to _stage-deploy-chain.yml — renders as parallel jobs below)
       ├── deploy-dev    ┐
       ├── deploy-intg   │ all parallel; each has its own GitHub Environment approval gate
@@ -91,7 +91,7 @@ setup
 
 **Key behaviours:**
 - `setup` runs `Resolve-SolutionMatrix.ps1` to read `solutions.json`, apply topological sort over `dependsOn`, and build the GitHub Actions matrix
-- `lint-config` calls `_reusable-lint.yml` in GHA-Core — validates solutions.json paths (now at `src/solutions/{Name}/deployment-settings-{env}.json`), project-vars.yml protected keys, unresolved tokens
+- `lint-config` calls `_reusable-lint.yml` in GHA-CICD-Core — validates solutions.json paths (now at `src/solutions/{Name}/deployment-settings-{env}.json`), project-vars.yml protected keys, unresolved tokens
 - `stage-export` calls `_stage-export.yml`; when triggered by a push event or when `skip_export=true`, the export jobs are skipped — the commit job still runs to write `pipeline-context.json`
 - `stage-build` calls `_stage-build.yml` which fans out to `_job-build.yml` per solution. Passes `vars.ENABLE_ROLLBACK` (not a dispatch input) to determine backup behaviour
 - `stage-deploy` is a single call to `_stage-deploy-chain.yml` — GitHub renders the 5 environment jobs as transparent parallel sibling nodes in the Actions UI, each with its own approval gate
@@ -171,17 +171,17 @@ setup → export (matrix, max-parallel:1) → create-pr
 
 ---
 
-> **Workflows removed from GHA-Dynamics in refactor:** `rollback.yml`, `lint-and-validate.yml`, `pipeline-test.yml`, and `pr-validation.yml` no longer exist as standalone workflows in GHA-Dynamics. They have moved to GHA-Core as reusable/standalone workflows. See Section 2 for their new locations.
+> **Workflows removed from GHA-Dynamics in refactor:** `rollback.yml`, `lint-and-validate.yml`, `pipeline-test.yml`, and `pr-validation.yml` no longer exist as standalone workflows in GHA-Dynamics. They have moved to GHA-CICD-Core as reusable/standalone workflows. See Section 2 for their new locations.
 
 ---
 
 ### `test-servicenow.yml` — ServiceNow Flow Simulation
 
-**Path:** `GHA-Core/.github/workflows/test-servicenow.yml`
-**Trigger:** `workflow_dispatch` only (run directly from the GHA-Core repository)
+**Path:** `GHA-CICD-Core/.github/workflows/test-servicenow.yml`
+**Trigger:** `workflow_dispatch` only (run directly from the GHA-CICD-Core repository)
 **Purpose:** Fully self-contained simulation of the ServiceNow change management lifecycle. No Azure login, no Dataverse connection, no real SNOW API calls — every step is simulated with realistic output and timing. Use this to verify the 14-step ServiceNow CR flow and confirm env var handoff between pre-deploy and post-deploy phases before enabling ServiceNow on a real environment.
 
-> **Note:** This workflow lives in GHA-Core and is triggered directly from the GHA-Core repository Actions tab. It is not a caller workflow in GHA-Dynamics.
+> **Note:** This workflow lives in GHA-CICD-Core and is triggered directly from the GHA-CICD-Core repository Actions tab. It is not a caller workflow in GHA-Dynamics.
 
 **Inputs:**
 
@@ -195,7 +195,7 @@ setup → export (matrix, max-parallel:1) → create-pr
 
 | Phase | Step | Action |
 |---|---|---|
-| Reveille | 1–6 | Checkout, GHA-Core checkout, Azure login, AKV fetch (6 secrets), merge variables, JFrog register |
+| Reveille | 1–6 | Checkout, GHA-CICD-Core checkout, Azure login, AKV fetch (6 secrets), merge variables, JFrog register |
 | Pre-Deploy | 1 | Load ServiceNow PS module |
 | Pre-Deploy | 2 | Set runtime env vars (description, build ID, change window) |
 | Pre-Deploy | 3 | `New-ServiceNowChangeRequest` → generates fake `CHG#######` CR number and sys_id GUID |
@@ -218,13 +218,13 @@ setup → export (matrix, max-parallel:1) → create-pr
 ---
 
 
-## 2. GHA-Core Reusable Workflows
+## 2. GHA-CICD-Core Reusable Workflows
 
-These workflows are called via `uses: ppudot2-cloud/GHA-Core/.github/workflows/{name}@main`. They must live in `.github/workflows/` root (GitHub constraint — subdirectories not supported for reusable workflows).
+These workflows are called via `uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/{name}@main`. They must live in `.github/workflows/` root (GitHub constraint — subdirectories not supported for reusable workflows).
 
 > **Architecture principle — Azure identity inputs**
 >
-> GHA-Core is a shared library and **never reads `vars.AZURE_*` directly**. Every reusable workflow that needs Azure OIDC authentication declares `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, and `azure_key_vault_name` as explicit `workflow_call` inputs. The caller (GHA-Dynamics) reads its own `vars.AZURE_*` repository variables and passes them as `with:` inputs. This keeps GHA-Core free of project-specific configuration and ensures that `vars.*` always resolve from the repo that owns them.
+> GHA-CICD-Core is a shared library and **never reads `vars.AZURE_*` directly**. Every reusable workflow that needs Azure OIDC authentication declares `azure_client_id`, `azure_tenant_id`, `azure_subscription_id`, and `azure_key_vault_name` as explicit `workflow_call` inputs. The caller (GHA-Dynamics) reads its own `vars.AZURE_*` repository variables and passes them as `with:` inputs. This keeps GHA-CICD-Core free of project-specific configuration and ensures that `vars.*` always resolve from the repo that owns them.
 
 ### `_stage-export.yml`
 
@@ -321,7 +321,7 @@ deploy
 ### `_reusable-lint.yml` — Config Linter
 
 **Path:** `.github/workflows/_reusable-lint.yml`
-**Called by:** `build-and-deploy.yml` (`lint-config` job) via `uses: ppudot2-cloud/GHA-Core/.github/workflows/_reusable-lint.yml@main`
+**Called by:** `build-and-deploy.yml` (`lint-config` job) via `uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/_reusable-lint.yml@main`
 **Standalone trigger:** Not directly dispatchable — call it from GHA-Dynamics or run `pipeline-test.yml` which covers lint indirectly.
 **Purpose:** Validates all pipeline configuration files before the export stage begins. Catches misconfiguration early, before any Dataverse or JFrog operations start. Failures block pipeline progression.
 
@@ -357,8 +357,8 @@ deploy
 ### `rollback.yml` — Manual Rollback
 
 **Path:** `.github/workflows/rollback.yml`
-**Trigger:** `workflow_dispatch` only (run directly from the GHA-Core repository Actions tab)
-**Purpose:** Manual rollback of a previously deployed solution to a specific Power Platform environment. Downloads the backup artifact from a prior pipeline run and re-imports it using PAC CLI. All processing lives in GHA-Core; GHA-Dynamics has no rollback workflow.
+**Trigger:** `workflow_dispatch` only (run directly from the GHA-CICD-Core repository Actions tab)
+**Purpose:** Manual rollback of a previously deployed solution to a specific Power Platform environment. Downloads the backup artifact from a prior pipeline run and re-imports it using PAC CLI. All processing lives in GHA-CICD-Core; GHA-Dynamics has no rollback workflow.
 
 > **Auto-rollback vs Manual rollback:** When `ENABLE_ROLLBACK=true` is set on a GitHub Environment (Dev/Intg/UAT/FRS/Perf/Prod), `deploy-all-solutions` automatically backs up and restores on import failure — no manual intervention required. This manual workflow is for situations where you need to roll back after a successful deploy (e.g. a post-deploy regression was found).
 
@@ -396,9 +396,9 @@ validate (confirm == environment check)
 ### `pipeline-test.yml` — Pipeline Integration Test
 
 **Path:** `.github/workflows/pipeline-test.yml`
-**Called by:** `build-and-deploy.yml` (`pipeline-tests` job) when `run_pipeline_tests=true`, via `uses: ppudot2-cloud/GHA-Core/.github/workflows/pipeline-test.yml@main`
+**Called by:** `build-and-deploy.yml` (`pipeline-tests` job) when `run_pipeline_tests=true`, via `uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/pipeline-test.yml@main`
 **Standalone triggers:** `pull_request` to `main` (paths: `.github/workflows/**`, `.github/actions/**`, `.github/scripts/**`); `push` to `main` (paths: `.github/workflows/**`, `.github/actions/**`); `workflow_dispatch`
-**Purpose:** Verifies the complete pipeline flow end-to-end in mock mode. No Dataverse changes, no Azure login, no JFrog upload. Cost: zero. Run this when modifying GHA-Core scripts, actions, or workflows, or when onboarding a new GHA-Dynamics project.
+**Purpose:** Verifies the complete pipeline flow end-to-end in mock mode. No Dataverse changes, no Azure login, no JFrog upload. Cost: zero. Run this when modifying GHA-CICD-Core scripts, actions, or workflows, or when onboarding a new GHA-Dynamics project.
 
 **What it validates:**
 - `solutions.json` resolves correctly via `Resolve-SolutionMatrix.ps1`
@@ -434,9 +434,9 @@ setup
 ---
 
 
-## 3. GHA-Core Composite Actions
+## 3. GHA-CICD-Core Composite Actions
 
-All actions live in `.github/actions/dynamics/` and are referenced as `ppudot2-cloud/GHA-Core/.github/actions/dynamics/{name}@main`.
+All actions live in `.github/actions/dynamics/` and are referenced as `ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/{name}@main`.
 
 ### `reveille`
 
@@ -446,7 +446,7 @@ All actions live in `.github/actions/dynamics/` and are referenced as `ppudot2-c
 
 Steps performed:
 1. `actions/checkout@v4` — checks out the **calling repository** (GHA-Dynamics) with full history
-2. `actions/checkout@v4` — checks out **GHA-Core** to `.ci/` using `GHA_CORE_PAT`
+2. `actions/checkout@v4` — checks out **GHA-CICD-Core** to `.ci/` using `GHA_CORE_PAT`
 3. `azure/login@v2` — OIDC login (skipped if `mock_deploy=true`)
 4. **Fetch secrets from Azure Key Vault** — always fetches `pp-app-id`, `pp-client-secret`, `pp-tenant-id`. Conditionally adds:
    - `jfrog-api-key` → `JFROG_TOKEN` (when `jfrog_enabled=true`)
@@ -472,7 +472,7 @@ Steps performed:
 > - Expose `GHA_CORE_PAT` via `env: GHA_CORE_PAT` on the step
 > - Pass `vars.AZURE_*` values explicitly as `azure_*` inputs
 >
-> This is by design — GHA-Core owns no project variables. All identity configuration lives in the caller repo.
+> This is by design — GHA-CICD-Core owns no project variables. All identity configuration lives in the caller repo.
 
 ---
 
@@ -728,7 +728,7 @@ Calls `Invoke-JFrogAction.ps1 upload` with the managed ZIP, unmanaged ZIP, and S
 
 ---
 
-## 4. GHA-Core PowerShell Scripts
+## 4. GHA-CICD-Core PowerShell Scripts
 
 All scripts are in `.github/scripts/dynamics/`. On the runner they are at `.ci/.github/scripts/dynamics/` after `reveille` runs. All scripts support mock mode.
 
@@ -823,7 +823,7 @@ In mock mode: simulates the comparison without connecting to PP.
 ### `Merge-Variables.ps1`
 
 **Called by:** `reveille` composite action (at the start of every build and deploy job)
-**Purpose:** Reads `GHA-Core/.github/variables/dynamics/global-vars.yml` then `GHA-Dynamics/.github/config/project-vars.yml`. Enforces governance — if a project variable key appears in `protected_keys`, the pipeline fails with a violation report. For non-protected keys, project values override global values. Azure identity keys (`AZURE_*`) are excluded from the merge to prevent shadowing the OIDC-provided identity. Writes all merged key=value pairs to `$GITHUB_ENV`.
+**Purpose:** Reads `GHA-CICD-Core/.github/variables/dynamics/global-vars.yml` then `GHA-Dynamics/.github/config/project-vars.yml`. Enforces governance — if a project variable key appears in `protected_keys`, the pipeline fails with a violation report. For non-protected keys, project values override global values. Azure identity keys (`AZURE_*`) are excluded from the merge to prevent shadowing the OIDC-provided identity. Writes all merged key=value pairs to `$GITHUB_ENV`.
 
 **Parameters:** `-GlobalVarsPath`, `-ProjectVarsPath`, `-DryRun` (switch)
 
@@ -992,7 +992,7 @@ Store `PROD_DataverseConnectionId` as a GitHub Variable (non-sensitive) or Secre
 
 ### `global-vars.yml`
 
-**Path:** `GHA-Core/.github/variables/dynamics/global-vars.yml`
+**Path:** `GHA-CICD-Core/.github/variables/dynamics/global-vars.yml`
 **Purpose:** Org-wide default variable values and governance. Applied to every pipeline run across all GHA-Dynamics repos. Contains two sections:
 
 - `protected_keys` — keys that project repos (GHA-Dynamics) **cannot** override. Enforced by `Merge-Variables.ps1`.

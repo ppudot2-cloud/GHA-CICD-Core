@@ -1,0 +1,314 @@
+# =============================================================================
+# WORKFLOW: Build and Deploy
+# =============================================================================
+#
+# STAGES
+# ─────────────────────────────────────────────────────────────────────────────
+#   1. Setup    — resolve solution matrix, read Core vars (JFrog, base solutions)
+#   2. Export   — lint + export run in parallel; commit waits for both
+#   3. Build    — validate pipeline config first, then pack ZIPs + Solution Checker
+#   4. Deploy   — Dev / Intg / UAT / FRS / Perf in parallel, each with approval gate
+#
+# ROLLBACK
+# ─────────────────────────────────────────────────────────────────────────────
+# Set ENABLE_ROLLBACK=true as a GitHub Environment variable (per environment) to
+# take a pre-import backup and restore automatically on import failure.
+# For manual rollback trigger GHA-CICD-Core/.github/workflows/rollback.yml.
+#
+# PROD DEPLOYMENT
+# ─────────────────────────────────────────────────────────────────────────────
+# Prod is deployed by deploy-prod.yml, which fires when the feature branch PR
+# is merged to main. Set SKIP_UAT=true repo variable to bypass UAT re-validation
+# in an emergency.
+# =============================================================================
+
+name: Build and Deploy
+
+on:
+  # ── Auto-trigger when solution source is pushed to a feature branch ──────────
+  push:
+    branches:
+      - 'feature/**'
+    paths-ignore:
+      - 'pipeline-context.json'
+
+  workflow_dispatch:
+    inputs:
+      solutions:
+        description: '"all" or comma-separated solution names'
+        required: false
+        default: 'all'
+        type: string
+
+      skip_export:
+        description: >
+          Skip sandbox export — build from source already committed to this branch.
+        required: false
+        default: false
+        type: boolean
+
+      mock_deploy:
+        description: >
+          Dry run — simulate export, build, and deploy without touching Power Platform,
+          git, or JFrog. No branch is created, no PR is raised.
+        required: false
+        default: false
+        type: boolean
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: "build-and-deploy-${{ github.ref_name }}"
+  cancel-in-progress: false
+
+jobs:
+  # ============================================================================
+  # Stage 1 — Setup
+  # ============================================================================
+  setup:
+    name: "🔍 Setup"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix:           ${{ steps.resolve.outputs.matrix }}
+      solution_list:    ${{ steps.resolve.outputs.solution_list }}
+      solution_count:   ${{ steps.resolve.outputs.solution_count }}
+      gha_core_pat_set: ${{ steps.check-creds.outputs.gha_core_pat_set }}
+      jfrog_url:        ${{ steps.core-vars.outputs.jfrog_url }}
+      jfrog_repo:       ${{ steps.core-vars.outputs.jfrog_repo }}
+      base_solutions:   ${{ steps.core-vars.outputs.base_solutions }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout GHA-CICD-Core CI scripts
+        uses: actions/checkout@v4
+        with:
+          repository: ppudot2-cloud/GHA-CICD-Core
+          ref: {{GHA_CORE_REF}}
+          path: .ci
+          token: ${{ secrets.GHATOKEN || github.token }}
+
+      - name: Read Core pipeline variables (JFROG)
+        id: core-vars
+        shell: pwsh
+        run: |
+          # JFROG_URL and JFROG_REPO are protected Core variables.
+          # Read them from global-vars.yml so the project layer cannot override them.
+          $content   = Get-Content '.ci/.github/variables/dynamics/global-vars.yml' -Raw
+          $jfrogUrl      = if ($content -match '(?m)^\s+JFROG_URL:\s*"?([^"\n]*?)"?\s*$')      { $Matches[1].Trim() } else { '' }
+          $jfrogRepo     = if ($content -match '(?m)^\s+JFROG_REPO:\s*"?([^"\n]*?)"?\s*$')     { $Matches[1].Trim() } else { 'powerplatform-solutions' }
+          $baseSolutions = if ($content -match '(?m)^\s+BASE_SOLUTIONS:\s*"?([^"\n]*?)"?\s*$') { $Matches[1].Trim() } else { '' }
+          "jfrog_url=$jfrogUrl"           | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "jfrog_repo=$jfrogRepo"         | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "base_solutions=$baseSolutions" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "  JFROG_URL       = $(if ($jfrogUrl) { $jfrogUrl } else { '(not set — JFrog archival disabled)' })"
+          Write-Host "  JFROG_REPO      = $jfrogRepo"
+          Write-Host "  BASE_SOLUTIONS  = $(if ($baseSolutions) { $baseSolutions } else { '(not set — base-solution checks skipped)' })"
+
+      - name: Resolve solution matrix
+        id: resolve
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/dynamics/Resolve-SolutionMatrix.ps1 `
+            -InputSolutions    '${{ inputs.solutions || 'all' }}' `
+            -PpSolutionName    '${{ vars.PP_SOLUTION_NAME }}' `
+            -SolutionsJsonPath 'solutions.json'
+
+      - name: Check credential presence
+        id: check-creds
+        shell: pwsh
+        run: |
+          $r = @{
+            gha_core_pat_set = ('${{ secrets.GHATOKEN }}' -ne '')
+          }
+          foreach ($k in $r.Keys) {
+            "$k=$($r[$k].ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "  $k = $($r[$k])"
+          }
+
+  # ============================================================================
+  # Stage 2 — Export
+  # ============================================================================
+  stage-export:
+    name: "📤 Export / Commit"
+    needs: [setup]
+    permissions:
+      id-token:      write
+      contents:      write
+      actions:       read
+      pull-requests: write
+    uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/_stage-export.yml@{{GHA_CORE_REF}}
+    with:
+      matrix:                 ${{ needs.setup.outputs.matrix }}
+      solution_list:          ${{ needs.setup.outputs.solution_list }}
+      source_environment_url: ${{ vars.PP_SDBX_URL || 'https://mock.crm.dynamics.com' }}
+      mock_deploy:            ${{ inputs.mock_deploy == true }}
+      skip_export:            ${{ inputs.skip_export == true || github.event_name == 'push' }}
+      azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
+      azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      azure_key_vault_name:   ${{ vars.AZURE_KEY_VAULT_NAME }}
+    secrets: inherit
+
+  # ============================================================================
+  # Stage 3 — Build
+  # ============================================================================
+  stage-build:
+    name: "🏗️ Build"
+    needs: [setup, stage-export]
+    permissions:
+      id-token: write
+      contents: read
+    uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/_stage-build.yml@{{GHA_CORE_REF}}
+    with:
+      matrix:                 ${{ needs.setup.outputs.matrix }}
+      use_exported_source:    ${{ inputs.mock_deploy != true && inputs.skip_export != true && github.event_name != 'push' }}
+      source_environment_url: ${{ vars.PP_SDBX_URL || '' }}
+      mock_deploy:            ${{ inputs.mock_deploy == true }}
+      jfrog_url:              ${{ needs.setup.outputs.jfrog_url }}
+      jfrog_repo:             ${{ needs.setup.outputs.jfrog_repo }}
+      enable_backup:          ${{ vars.ENABLE_ROLLBACK == 'true' }}
+      base_solutions:         ${{ needs.setup.outputs.base_solutions }}
+      solution_count:         ${{ needs.setup.outputs.solution_count }}
+      solution_list:          ${{ needs.setup.outputs.solution_list }}
+      pp_sdbx_url:            ${{ vars.PP_SDBX_URL || '' }}
+      pp_dev_url:             ${{ vars.PP_DEV_URL || '' }}
+      pp_intg_url:            ${{ vars.PP_INTG_URL || '' }}
+      pp_uat_url:             ${{ vars.PP_UAT_URL || '' }}
+      pp_frs_url:             ${{ vars.PP_FRS_URL || '' }}
+      pp_perf_url:            ${{ vars.PP_PERF_URL || '' }}
+      pp_prod_url:            ${{ vars.PP_PROD_URL || '' }}
+      gha_core_pat_set:       ${{ needs.setup.outputs.gha_core_pat_set == 'true' }}
+      azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
+      azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id:  ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      azure_key_vault_name:   ${{ vars.AZURE_KEY_VAULT_NAME }}
+    secrets: inherit
+
+  # ============================================================================
+  # Stage 4 — Deploy  (Dev, Intg, UAT, FRS, Perf)
+  # ============================================================================
+  stage-deploy:
+    name: "🚀 Deploy | Pre-Prod"
+    needs: [setup, stage-export, stage-build]
+    if: needs.stage-build.result == 'success'
+    permissions:
+      id-token: write
+      contents: read
+      actions:  read
+      pull-requests: write
+    uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/_stage-deploy-chain.yml@{{GHA_CORE_REF}}
+    with:
+      environments:          'Dev,Intg,UAT,FRS,Perf'
+      matrix:                ${{ needs.setup.outputs.matrix }}
+      mock_deploy:           ${{ inputs.mock_deploy == true }}
+      solution_list:         ${{ needs.setup.outputs.solution_list }}
+      enable_servicenow:     ${{ vars.SERVICENOW_ENABLED == 'true' }}
+      activate_flows:        true
+      base_solutions:        ${{ needs.setup.outputs.base_solutions }}
+      jfrog_url:             ${{ needs.setup.outputs.jfrog_url }}
+      jfrog_repo:            ${{ needs.setup.outputs.jfrog_repo }}
+      run_number:            ${{ github.run_number }}
+      run_attempt:           ${{ github.run_attempt }}
+      azure_client_id:       ${{ vars.AZURE_CLIENT_ID }}
+      azure_tenant_id:       ${{ vars.AZURE_TENANT_ID }}
+      azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      azure_key_vault_name:  ${{ vars.AZURE_KEY_VAULT_NAME }}
+      dev_config: >-
+        {"name":"Dev","url":"${{ vars.PP_DEV_URL }}","solution_type":"Unmanaged","enable_backup":"${{ vars.ENABLE_ROLLBACK == 'true' }}","enable_blocking_check":"false","enable_version_compare":"false","import_config_data":"false","previous_url":""}
+      intg_config: >-
+        {"name":"Intg","url":"${{ vars.PP_INTG_URL }}","solution_type":"Managed","enable_backup":"${{ vars.ENABLE_ROLLBACK == 'true' }}","enable_blocking_check":"true","enable_version_compare":"true","import_config_data":"false","previous_url":"${{ vars.PP_DEV_URL }}"}
+      uat_config: >-
+        {"name":"UAT","url":"${{ vars.PP_UAT_URL }}","solution_type":"Managed","enable_backup":"${{ vars.ENABLE_ROLLBACK == 'true' }}","enable_blocking_check":"true","enable_version_compare":"true","import_config_data":"false","previous_url":"${{ vars.PP_INTG_URL }}"}
+      frs_config: >-
+        {"name":"FRS","url":"${{ vars.PP_FRS_URL }}","solution_type":"Managed","enable_backup":"${{ vars.ENABLE_ROLLBACK == 'true' }}","enable_blocking_check":"true","enable_version_compare":"true","import_config_data":"false","previous_url":"${{ vars.PP_UAT_URL }}"}
+      perf_config: >-
+        {"name":"Perf","url":"${{ vars.PP_PERF_URL }}","solution_type":"Managed","enable_backup":"${{ vars.ENABLE_ROLLBACK == 'true' }}","enable_blocking_check":"true","enable_version_compare":"true","import_config_data":"false","previous_url":"${{ vars.PP_FRS_URL }}"}
+      feature_branch:    ${{ needs.stage-export.outputs.feature_branch }}
+      pr_base_branch:    'main'
+      pr_repository:     ${{ github.repository }}
+      pr_run_id:         ${{ github.run_id }}
+      pr_run_number:     ${{ github.run_number }}
+      pr_actor:          ${{ github.actor }}
+      pr_mock_deploy:    ${{ inputs.mock_deploy == true }}
+      pr_server_url:     ${{ github.server_url }}
+    secrets: inherit
+
+  # ============================================================================
+  # Pipeline Summary (always runs)
+  # ============================================================================
+  pipeline-summary:
+    name: "📋 Pipeline Summary"
+    needs: [setup, stage-export, stage-build, stage-deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout GHA-CICD-Core CI scripts
+        uses: actions/checkout@v4
+        with:
+          repository: ppudot2-cloud/GHA-CICD-Core
+          ref: {{GHA_CORE_REF}}
+          path: .ci
+          token: ${{ secrets.GHATOKEN || github.token }}
+
+      - name: Download job summary records
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "job-summary-*"
+          path: job-summaries/
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Write pipeline summary
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/dynamics/Write-PipelineSummary.ps1 `
+            -SolutionList    '${{ needs.setup.outputs.solution_list }}' `
+            -SolutionCount   '${{ needs.setup.outputs.solution_count }}' `
+            -RunNumber       '${{ github.run_number }}' `
+            -RefName         '${{ github.ref_name }}' `
+            -CommitSha       '${{ github.sha }}' `
+            -ExportResult    '${{ needs.stage-export.result }}' `
+            -BuildResult     '${{ needs.stage-build.result }}' `
+            -DeployResult    '${{ needs.stage-deploy.outputs.uat_result }}' `
+            -JobSummariesDir 'job-summaries'
+
+      - name: Send failure notification
+        if: >
+          vars.MAIL_SERVER != '' && (
+          needs.stage-export.result == 'failure' ||
+          needs.stage-build.result  == 'failure' ||
+          needs.stage-deploy.result == 'failure')
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ vars.MAIL_SERVER }}
+          server_port:    ${{ vars.MAIL_PORT }}
+          username:       ${{ vars.MAIL_USERNAME }}
+          password:       ${{ secrets.MAIL_PASSWORD }}
+          to:             {{NOTIFICATION_EMAIL}}
+          from:           GitHub Actions <${{ vars.MAIL_USERNAME }}>
+          subject:        "❌ Build and Deploy FAILED — ${{ github.repository }} #${{ github.run_number }}"
+          body: |
+            Pipeline 1 failed for run #${{ github.run_number }}.
+
+            Repository  : ${{ github.repository }}
+            Branch      : ${{ github.ref_name }}
+            Triggered by: ${{ github.actor }}
+
+            Stage results:
+              Export : ${{ needs.stage-export.result }}
+              Build  : ${{ needs.stage-build.result }}
+              Deploy : ${{ needs.stage-deploy.result }}
+              UAT    : ${{ needs.stage-deploy.outputs.uat_result }}
+
+            Solutions: ${{ needs.setup.outputs.solution_list }}
+
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

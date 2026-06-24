@@ -1,4 +1,4 @@
-# Runbooks — GHA-Core + GHA-Dynamics Pipeline Operations
+# Runbooks — GHA-CICD-Core + GHA-Dynamics Pipeline Operations
 
 > **Audience:** Platform engineers and release managers who operate the Power Platform CI/CD pipeline.
 > **Use this when:** A pipeline is stuck, a deployment failed, an environment needs emergency attention, or a credential must be rotated urgently.
@@ -426,7 +426,7 @@ Re-upload missing artifacts using `Invoke-JFrogAction.ps1 upload` directly:
 **Option A — Personal Access Token (PAT)**
 
 1. Go to GitHub → **Settings → Developer settings → Personal access tokens → Tokens (classic)**
-2. Generate a new token with `repo` scope (select the `ppudot2-cloud/GHA-Core` repo specifically if using fine-grained tokens)
+2. Generate a new token with `repo` scope (select the `ppudot2-cloud/GHA-CICD-Core` repo specifically if using fine-grained tokens)
 3. Navigate to **GHA-Dynamics → Settings → Secrets and variables → Actions → Secrets → GHA_CORE_PAT**
 4. Click **Update** and paste the new token
 5. Verify: trigger a mock run (`mock_deploy: true`) and confirm the checkout step passes
@@ -436,7 +436,7 @@ Re-upload missing artifacts using `Invoke-JFrogAction.ps1 upload` directly:
 Using a GitHub App produces short-lived tokens (1-hour TTL) that rotate automatically:
 
 1. Create a GitHub App in your organisation (Settings → Developer settings → GitHub Apps)
-2. Grant `Contents: Read` and `Pull requests: Write` repository permissions on `GHA-Core` and `GHA-Dynamics`
+2. Grant `Contents: Read` and `Pull requests: Write` repository permissions on `GHA-CICD-Core` and `GHA-Dynamics`
 3. Install the App on both repositories
 4. Store the App ID and private key in Azure Key Vault (`github-app-id`, `github-app-private-key`)
 5. Modify `reveille/action.yml` to generate an installation token using `actions/create-github-app-token@v1` before the checkout steps
@@ -617,23 +617,23 @@ Add `ACTIONS_RUNNER_DEBUG: true` and `ACTIONS_STEP_DEBUG: true` as repository se
 
 | Error | Cause | Fix |
 |---|---|---|
-| `The term '.ci/.github/scripts/dynamics/...' is not recognized` | `reveille` checkout of GHA-Core to `.ci/` failed | Check `GHA_CORE_PAT` is valid; verify repo name in reveille action.yml |
+| `The term '.ci/.github/scripts/dynamics/...' is not recognized` | `reveille` checkout of GHA-CICD-Core to `.ci/` failed | Check `GHA_CORE_PAT` is valid; verify repo name in reveille action.yml |
 | `Error: Process completed with exit code 1` on PAC install | GitHub Actions runner has transient network issue | Re-run the job — PAC CLI download from NuGet is intermittently flaky |
 | `Login failed: The process '/usr/bin/az' failed` | Azure OIDC misconfigured | Verify federated credential subject matches exactly: `repo:YOUR_ORG/GHA-Dynamics:environment:Dev` |
 | `AADSTS700016: Application 'xxx' was not found` | Wrong `AZURE_TENANT_ID` | Ensure `AZURE_TENANT_ID` is YOUR tenant, not the Contoso demo tenant |
 | Runner memory exhausted (large solution pack) | Solution ZIP > 500MB | Split solution into sub-solutions or request larger runner via `runs-on: ubuntu-latest-16-cores` |
 | `error: failed to push some refs` | Concurrent export jobs writing to same branch | Export jobs always run with `max-parallel: 1` — if this error appears, check for a manually triggered conflicting run |
 
-### Check which version of GHA-Core is running
+### Check which version of GHA-CICD-Core is running
 
-The `reveille` action logs the GHA-Core commit SHA during checkout. Check the "Set up job" step output in any workflow run:
+The `reveille` action logs the GHA-CICD-Core commit SHA during checkout. Check the "Set up job" step output in any workflow run:
 
 ```
-Checking out ppudot2-cloud/GHA-Core to .ci/ ...
+Checking out ppudot2-cloud/GHA-CICD-Core to .ci/ ...
 Cloned at: abc123def456...
 ```
 
-This is the actual commit that ran. Cross-reference against `https://github.com/YOUR_ORG/GHA-Core/commits/main` to confirm you are on the expected version.
+This is the actual commit that ran. Cross-reference against `https://github.com/YOUR_ORG/GHA-CICD-Core/commits/main` to confirm you are on the expected version.
 
 ---
 

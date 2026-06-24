@@ -12,7 +12,7 @@
       - Empty project-vars.yml merges globals without error
 
 .NOTES
-    Run from the GHA-Core repository root:
+    Run from the GHA-CICD-Core repository root:
         Invoke-Pester .github/servicenow/Tests/Unit/Dynamics/Merge-Variables.Tests.ps1
 
     Requires: Pester v5+, PowerShell 7+

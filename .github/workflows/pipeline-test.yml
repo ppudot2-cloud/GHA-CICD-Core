@@ -2,7 +2,7 @@
 # WORKFLOW: Pipeline Integration Test (Full Mock Run)
 # =============================================================================
 #
-# LOCATION: GHA-Core (this file).
+# LOCATION: GHA-CICD-Core (this file).
 #
 # WHY IT LIVES IN CORE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -10,7 +10,7 @@
 # implementation and can be:
 #   A) Called as a reusable workflow from GHA-Dynamics build-and-deploy.yml
 #      (when `run_pipeline_tests: true` input is passed).
-#   B) Triggered standalone from GHA-Core's own Actions tab (for CI on core changes).
+#   B) Triggered standalone from GHA-CICD-Core's own Actions tab (for CI on core changes).
 #
 # PURPOSE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@
 #
 # What it validates:
 #   ✅ solutions.json resolves correctly via Resolve-SolutionMatrix.ps1
-#   ✅ GHA-Core _stage-build.yml can be called with current inputs
+#   ✅ GHA-CICD-Core _stage-build.yml can be called with current inputs
 #   ✅ Mock build: version stamp, pack, solution checker simulation
 #   ✅ Mock deploy: deploy-all-solutions composite action end-to-end
 #   ✅ All PowerShell scripts (unit tests) pass via Pester
@@ -50,7 +50,7 @@ on:
         default: ''
         type: string
 
-  # ── Standalone: run from GHA-Core Actions tab ────────────────────────────────
+  # ── Standalone: run from GHA-CICD-Core Actions tab ────────────────────────────────
   pull_request:
     branches: [main]
     paths:
@@ -71,7 +71,7 @@ on:
         required: false
         default: 'all'
       caller_repo:
-        description: 'Optional: GHA-Dynamics repo to test against (org/repo). Leave blank to use GHA-Core test fixtures.'
+        description: 'Optional: GHA-Dynamics repo to test against (org/repo). Leave blank to use GHA-CICD-Core test fixtures.'
         required: false
         default: ''
 
@@ -91,7 +91,7 @@ jobs:
       solution_count: ${{ steps.resolve.outputs.solution_count }}
 
     steps:
-      - name: Checkout GHA-Core
+      - name: Checkout GHA-CICD-Core
         uses: actions/checkout@v4
         with:
           path: .ci
@@ -151,7 +151,7 @@ jobs:
     name: "🧪 Pester Unit Tests"
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout GHA-Core
+      - name: Checkout GHA-CICD-Core
         uses: actions/checkout@v4
         with:
           path: .ci
@@ -201,7 +201,7 @@ jobs:
   mock-build:
     name: "🔨 Mock Build Stage"
     needs: setup
-    uses: ppudot2-cloud/GHA-Core/.github/workflows/_stage-build.yml@main
+    uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/_stage-build.yml@main
     with:
       matrix:                ${{ needs.setup.outputs.matrix }}
       mock_deploy:           true
@@ -228,12 +228,12 @@ jobs:
 
     steps:
       - name: Reveille (mock — skips Azure login and AKV fetch)
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@main
         with:
           mock_deploy: 'true'
 
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@main
 
       - name: Download solution artifacts
         uses: actions/download-artifact@v4
@@ -245,7 +245,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Deploy all solutions → Dev (mock)
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@main
         with:
           solutions_json:           ${{ needs.setup.outputs.matrix }}
           environment_name:         Dev

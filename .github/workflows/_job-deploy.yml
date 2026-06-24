@@ -159,7 +159,7 @@ jobs:
 
     steps:
       - name: Reveille
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@main
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
@@ -169,7 +169,7 @@ jobs:
           azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@main
 
       - name: Download solution artifacts
         uses: actions/download-artifact@v4
@@ -181,7 +181,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Deploy all solutions → ${{ inputs.environment_name }}
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@main
         with:
           solutions_json:           ${{ inputs.matrix }}
           environment_name:         ${{ inputs.environment_name }}

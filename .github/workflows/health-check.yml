@@ -12,7 +12,7 @@
 #
 # USAGE — standalone (workflow_dispatch)
 # ─────────────────────────────────────────────────────────────────────────────
-# Trigger manually from GHA-Core's Actions tab. Paste a JSON array into the
+# Trigger manually from GHA-CICD-Core's Actions tab. Paste a JSON array into the
 # checks_config input. Example:
 #
 #   [
@@ -40,7 +40,7 @@
 #
 #   jobs:
 #     health-check:
-#       uses: ppudot2-cloud/GHA-Core/.github/workflows/health-check.yml@main
+#       uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/health-check.yml@main
 #       with:
 #         checks_config: ${{ toJson(vars.HEALTH_CHECK_CONFIG) }}
 #         warning_days: 30
@@ -164,7 +164,7 @@ jobs:
           #   2. Repository variables HEALTH_CHECK_CONFIG / HEALTH_CHECK_WARN_DAYS
           #      (used automatically by the schedule trigger which has no inputs)
           # Set these variables once in:
-          #   GHA-Core → Settings → Secrets and variables → Variables
+          #   GHA-CICD-Core → Settings → Secrets and variables → Variables
           CHECKS_CONFIG:  ${{ inputs.checks_config || vars.HEALTH_CHECK_CONFIG }}
           WARNING_DAYS:   ${{ inputs.warning_days || vars.HEALTH_CHECK_WARN_DAYS || '30' }}
           # GitHub OIDC endpoint — needed to mint per-context tokens
@@ -526,7 +526,7 @@ jobs:
       # The webhook receives a JSON POST with a text summary — compatible with Slack
       # Incoming Webhooks, Teams connectors, and PagerDuty Events API v2.
       #
-      # To enable: set HEALTH_CHECK_WEBHOOK in GHA-Core repo variables:
+      # To enable: set HEALTH_CHECK_WEBHOOK in GHA-CICD-Core repo variables:
       #   Settings → Secrets and variables → Variables → HEALTH_CHECK_WEBHOOK
       #   Value example (Slack): https://hooks.slack.com/services/T.../B.../...
       - name: Send critical alert via webhook

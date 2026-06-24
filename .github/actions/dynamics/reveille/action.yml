@@ -2,7 +2,7 @@
 # COMPOSITE ACTION: CI Bootstrap
 # =============================================================================
 # Shared first-step group used by both _job-build and _job-deploy.
-# Performs: repo checkout, GHA-Core CI checkout, Azure OIDC login,
+# Performs: repo checkout, GHA-CICD-Core CI checkout, Azure OIDC login,
 #           AKV secret fetch, and global/project variable merge.
 #
 # NOTE: Composite actions cannot access ${{ secrets.* }} directly.
@@ -68,10 +68,10 @@ runs:
       with:
         fetch-depth: 1   # shallow clone — pipeline steps never need full git history
 
-    - name: Checkout GHA-Core CI scripts
+    - name: Checkout GHA-CICD-Core CI scripts
       uses: actions/checkout@v4
       with:
-        repository: ppudot2-cloud/GHA-Core
+        repository: ppudot2-cloud/GHA-CICD-Core
         ref:        v1.0.0   # pinned — prevents unreviewed Core changes from breaking jobs mid-run
         path:       .ci
         fetch-depth: 1

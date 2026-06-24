@@ -1,7 +1,7 @@
 # =============================================================================
-# GLOBAL PIPELINE VARIABLES — GHA-Core
+# GLOBAL PIPELINE VARIABLES — GHA-CICD-Core
 # =============================================================================
-# These variables apply to ALL projects that consume GHA-Core reusable workflows.
+# These variables apply to ALL projects that consume GHA-CICD-Core reusable workflows.
 #
 # GOVERNANCE RULES:
 #   • protected_keys  : variables that project repos (GHA-Dynamics) CANNOT override.
@@ -10,7 +10,7 @@
 #
 # HOW VARIABLES REACH THE PIPELINE:
 #   At the start of each reusable workflow, Merge-Variables.ps1 is executed.
-#   It reads this file (from the GHA-Core checkout) and the project's
+#   It reads this file (from the GHA-CICD-Core checkout) and the project's
 #   project-vars.yml, merges them (project adds/overrides non-protected keys),
 #   and writes the result to $GITHUB_ENV so all subsequent steps can use
 #   ${{ env.VAR_NAME }} syntax.
@@ -28,8 +28,8 @@
 # Add any key here that must be consistent across all projects.
 protected_keys:
   # These keys enforce org-wide consistency — project repos cannot override them.
-  # Azure identity (AZURE_*) and GHA-Core location are intentionally NOT protected:
-  # each project has its own Key Vault, App Registration, and GHA-Core reference.
+  # Azure identity (AZURE_*) and GHA-CICD-Core location are intentionally NOT protected:
+  # each project has its own Key Vault, App Registration, and GHA-CICD-Core reference.
   - PP_CHECKER_GEO            # Solution Checker geography — org-wide consistency
   - PP_CHECKER_ERROR_LEVEL    # Minimum severity that fails the build — security gate
   - DEFAULT_SOLUTION_TYPE     # All solutions must be managed in upper environments

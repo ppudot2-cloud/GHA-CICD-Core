@@ -1,0 +1,323 @@
+# =============================================================================
+# WORKFLOW: Deploy UAT + Prod — Pipeline 2
+# =============================================================================
+#
+# Triggered automatically when a feature/* branch PR is MERGED to main.
+# This is the second and final pipeline of the two-pipeline architecture:
+#
+#   Pipeline 1 — build-and-deploy.yml  → Export + Build + Dev/Intg/UAT/FRS/Perf
+#   Pipeline 2 — THIS WORKFLOW         → UAT (re-validation) + Prod
+#
+# HOW IT WORKS:
+#   1. Fires when pipeline-context.json is pushed to main — this only happens
+#      when a feature/* branch PR is merged.
+#   2. Reads pipeline-context.json to get the Pipeline 1 run_id for artifact download.
+#   3. Deploys UAT as a final validation gate before Prod.
+#   4. Deploys Prod — pauses at the Prod GitHub Environment approval gate.
+#
+# TRIGGERS:
+#   push to main where pipeline-context.json changed (i.e. feature/* PR merged)
+#   workflow_dispatch — manual re-run or ad-hoc promotion
+# =============================================================================
+
+name: Deploy UAT + Prod
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pipeline-context.json'
+
+  workflow_dispatch:
+    inputs:
+      mock_deploy:
+        description: 'Simulate UAT + Prod deployment without touching Dataverse'
+        required: false
+        default: false
+        type: boolean
+
+      skip_uat:
+        description: >
+          ⚠️ BYPASS UAT — skip UAT re-validation and go directly to Prod.
+          Break-glass only. Requires explicit Prod environment approval.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: "deploy-prod"
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: "🛡️ Verify trigger"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm trigger
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "✅ pipeline-context.json pushed to main — feature branch merged"
+            echo "   commit : ${{ github.sha }}"
+            echo "   actor  : ${{ github.actor }}"
+          else
+            echo "✅ Manual dispatch by @${{ github.actor }}"
+          fi
+
+  read-context:
+    name: "📖 Read pipeline context"
+    needs: guard
+    runs-on: ubuntu-latest
+    outputs:
+      run_id:        ${{ steps.ctx.outputs.run_id }}
+      run_number:    ${{ steps.ctx.outputs.run_number }}
+      run_attempt:   ${{ steps.ctx.outputs.run_attempt }}
+      matrix:        ${{ steps.ctx.outputs.matrix }}
+      solution_list: ${{ steps.ctx.outputs.solution_list }}
+      mock_deploy:   ${{ steps.ctx.outputs.mock_deploy }}
+
+    steps:
+      - name: Checkout main (merge commit)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Parse pipeline-context.json
+        id: ctx
+        shell: pwsh
+        run: |
+          $ctxFile = 'pipeline-context.json'
+          if (-not (Test-Path $ctxFile)) {
+            Write-Error "::error::pipeline-context.json not found on main."
+            Write-Error "::error::Ensure Pipeline 1 (build-and-deploy.yml) completed and the feature branch was merged."
+            exit 1
+          }
+
+          $ctx = Get-Content $ctxFile | ConvertFrom-Json
+          Write-Host "Pipeline context loaded:"
+          Write-Host "  runId        : $($ctx.runId)"
+          Write-Host "  runNumber    : $($ctx.runNumber)"
+          Write-Host "  solutions    : $($ctx.solutionList)"
+          Write-Host "  featureBranch: $($ctx.featureBranch)"
+          Write-Host "  mockDeploy   : $($ctx.mockDeploy)"
+
+          $mockDeploy = if ($ctx.mockDeploy -eq $true) { 'true' } else { 'false' }
+
+          "run_id=$($ctx.runId)"               | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "run_number=$($ctx.runNumber)"       | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "run_attempt=$($ctx.runAttempt)"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "matrix=$($ctx.matrix)"              | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "solution_list=$($ctx.solutionList)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "mock_deploy=$mockDeploy"            | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+  deploy-uat:
+    name: "🚀 Deploy | UAT"
+    needs: [read-context]
+    if: inputs.skip_uat != true && vars.SKIP_UAT != 'true'
+    runs-on: ubuntu-latest
+    environment: UAT
+    permissions:
+      id-token: write
+      contents: read
+      actions:  read
+    env:
+      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
+    steps:
+      - name: Reveille
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@{{GHA_CORE_REF}}
+        with:
+          mock_deploy:           ${{ (inputs.mock_deploy == true || needs.read-context.outputs.mock_deploy == 'true') && 'true' || 'false' }}
+          jfrog_enabled:         ${{ vars.JFROG_URL != '' }}
+          mulesoft_enabled:      ${{ vars.MULESOFT_ENABLED == 'true' }}
+          servicenow_enabled:    ${{ vars.SERVICENOW_ENABLED == 'true' }}
+          azure_client_id:       ${{ vars.AZURE_CLIENT_ID }}
+          azure_tenant_id:       ${{ vars.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          azure_key_vault_name:  ${{ vars.AZURE_KEY_VAULT_NAME }}
+      - name: Install PAC CLI
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@{{GHA_CORE_REF}}
+      - name: Download solution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: solution-artifact-*
+          path: .
+          merge-multiple: true
+          run-id: ${{ needs.read-context.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Locate Solution Checker SARIF reports
+        id: find-sarif
+        shell: pwsh
+        run: |
+          $sarifPaths = @()
+          $pathFiles = Get-ChildItem -Path "." -Recurse -Filter "sarif.path" -ErrorAction SilentlyContinue
+          foreach ($pf in $pathFiles) {
+            $p = (Get-Content $pf.FullName -Raw).Trim()
+            if ($p -and $p -ne 'not-found' -and (Test-Path $p)) { $sarifPaths += $p }
+          }
+          if ($sarifPaths.Count -eq 0) {
+            $found = Get-ChildItem -Path "." -Recurse -Include "*.sarif","*.sarif.json" -ErrorAction SilentlyContinue
+            foreach ($f in $found) { $sarifPaths += $f.FullName }
+          }
+          $first = if ($sarifPaths.Count -gt 0) { $sarifPaths[0] } else { '' }
+          "sarif_path=$first" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Deploy all solutions → UAT
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@{{GHA_CORE_REF}}
+        with:
+          solutions_json:           ${{ needs.read-context.outputs.matrix }}
+          environment_name:         UAT
+          environment_url:          ${{ vars.PP_UAT_URL }}
+          solution_type:            Managed
+          enable_backup:            ${{ vars.ENABLE_ROLLBACK == 'true' }}
+          enable_blocking_check:    true
+          enable_version_compare:   true
+          import_config_data:       false
+          previous_environment_url: ${{ vars.PP_INTG_URL }}
+          tag_prod_deployed:        false
+          activate_flows:           true
+          mock_deploy:              ${{ (inputs.mock_deploy == true || needs.read-context.outputs.mock_deploy == 'true') && 'true' || 'false' }}
+          base_solutions:           ${{ vars.PP_BASE_SOLUTIONS || '' }}
+          jfrog_url:                ${{ vars.JFROG_URL || '' }}
+          jfrog_repo:               ${{ vars.JFROG_REPO || 'powerplatform-solutions' }}
+          run_number:               ${{ needs.read-context.outputs.run_number }}
+          run_attempt:              ${{ needs.read-context.outputs.run_attempt }}
+          enable_servicenow:        ${{ vars.SERVICENOW_ENABLED == 'true' }}
+          solution_list:            ${{ needs.read-context.outputs.solution_list }}
+          sarif_path:               ${{ steps.find-sarif.outputs.sarif_path }}
+
+  deploy-prod:
+    name: "🚀 Deploy | Prod"
+    needs: [read-context, deploy-uat]
+    if: needs.deploy-uat.result == 'success' || needs.deploy-uat.result == 'skipped'
+    runs-on: ubuntu-latest
+    environment: Prod
+    permissions:
+      id-token: write
+      contents: read
+      actions:  read
+    env:
+      GHA_CORE_PAT: ${{ secrets.GHATOKEN }}
+    steps:
+      - name: Reveille
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@{{GHA_CORE_REF}}
+        with:
+          mock_deploy:           ${{ (inputs.mock_deploy == true || needs.read-context.outputs.mock_deploy == 'true') && 'true' || 'false' }}
+          jfrog_enabled:         ${{ vars.JFROG_URL != '' }}
+          mulesoft_enabled:      ${{ vars.MULESOFT_ENABLED == 'true' }}
+          servicenow_enabled:    ${{ vars.SERVICENOW_ENABLED == 'true' }}
+          azure_client_id:       ${{ vars.AZURE_CLIENT_ID }}
+          azure_tenant_id:       ${{ vars.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          azure_key_vault_name:  ${{ vars.AZURE_KEY_VAULT_NAME }}
+      - name: Install PAC CLI
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@{{GHA_CORE_REF}}
+      - name: Download solution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: solution-artifact-*
+          path: .
+          merge-multiple: true
+          run-id: ${{ needs.read-context.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Locate Solution Checker SARIF reports
+        id: find-sarif
+        shell: pwsh
+        run: |
+          $sarifPaths = @()
+          $pathFiles = Get-ChildItem -Path "." -Recurse -Filter "sarif.path" -ErrorAction SilentlyContinue
+          foreach ($pf in $pathFiles) {
+            $p = (Get-Content $pf.FullName -Raw).Trim()
+            if ($p -and $p -ne 'not-found' -and (Test-Path $p)) { $sarifPaths += $p }
+          }
+          if ($sarifPaths.Count -eq 0) {
+            $found = Get-ChildItem -Path "." -Recurse -Include "*.sarif","*.sarif.json" -ErrorAction SilentlyContinue
+            foreach ($f in $found) { $sarifPaths += $f.FullName }
+          }
+          $first = if ($sarifPaths.Count -gt 0) { $sarifPaths[0] } else { '' }
+          "sarif_path=$first" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Deploy all solutions → Prod
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@{{GHA_CORE_REF}}
+        with:
+          solutions_json:           ${{ needs.read-context.outputs.matrix }}
+          environment_name:         Prod
+          environment_url:          ${{ vars.PP_PROD_URL }}
+          solution_type:            Managed
+          enable_backup:            ${{ vars.ENABLE_ROLLBACK == 'true' }}
+          enable_blocking_check:    true
+          enable_version_compare:   true
+          import_config_data:       true
+          previous_environment_url: ${{ vars.PP_PERF_URL }}
+          tag_prod_deployed:        true
+          activate_flows:           true
+          mock_deploy:              ${{ (inputs.mock_deploy == true || needs.read-context.outputs.mock_deploy == 'true') && 'true' || 'false' }}
+          base_solutions:           ${{ vars.PP_BASE_SOLUTIONS || '' }}
+          jfrog_url:                ${{ vars.JFROG_URL || '' }}
+          jfrog_repo:               ${{ vars.JFROG_REPO || 'powerplatform-solutions' }}
+          run_number:               ${{ needs.read-context.outputs.run_number }}
+          run_attempt:              ${{ needs.read-context.outputs.run_attempt }}
+          enable_servicenow:        ${{ vars.SERVICENOW_ENABLED == 'true' }}
+          solution_list:            ${{ needs.read-context.outputs.solution_list }}
+          sarif_path:               ${{ steps.find-sarif.outputs.sarif_path }}
+
+  pipeline-summary:
+    name: "📋 Pipeline 2 Summary"
+    needs: [read-context, deploy-uat, deploy-prod]
+    if: always() && needs.read-context.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write summary
+        shell: bash
+        run: |
+          UAT_RESULT="${{ needs.deploy-uat.result }}"
+          PROD_RESULT="${{ needs.deploy-prod.result }}"
+          SKIP_UAT="${{ inputs.skip_uat }}"
+          ICON="✅"
+          if [ "$PROD_RESULT" != "success" ]; then ICON="❌"; fi
+          if [ "$UAT_RESULT" == "failure" ]; then ICON="❌"; fi
+          UAT_LABEL="$UAT_RESULT"
+          if [ "$SKIP_UAT" == "true" ]; then UAT_LABEL="⚠️ BYPASSED (skip_uat=true)"; fi
+
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🚀 Pipeline 2 — UAT + Prod Deployment Summary
+
+          | Field | Value |
+          | --- | --- |
+          | Pipeline 1 run | #${{ needs.read-context.outputs.run_number }} |
+          | Solutions | ${{ needs.read-context.outputs.solution_list }} |
+          | UAT deploy | $UAT_LABEL |
+          | Prod deploy | ${{ needs.deploy-prod.result }} |
+          | Triggered by | @${{ github.actor }} |
+          EOF
+
+      - name: Send failure notification
+        if: >
+          vars.MAIL_SERVER != '' && (
+          needs.deploy-uat.result  == 'failure' ||
+          needs.deploy-prod.result == 'failure')
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ vars.MAIL_SERVER }}
+          server_port:    ${{ vars.MAIL_PORT }}
+          username:       ${{ vars.MAIL_USERNAME }}
+          password:       ${{ secrets.MAIL_PASSWORD }}
+          to:             {{NOTIFICATION_EMAIL}}
+          from:           GitHub Actions <${{ vars.MAIL_USERNAME }}>
+          subject:        "❌ UAT/Prod Deployment FAILED (Pipeline 2) — ${{ github.repository }} run #${{ needs.read-context.outputs.run_number }}"
+          body: |
+            ⚠️ Pipeline 2 (UAT + Prod) deployment failed.
+
+            Repository    : ${{ github.repository }}
+            Pipeline 1 run: #${{ needs.read-context.outputs.run_number }}
+            Solutions     : ${{ needs.read-context.outputs.solution_list }}
+            UAT result    : ${{ needs.deploy-uat.result }}
+            Prod result   : ${{ needs.deploy-prod.result }}
+            Triggered by  : @${{ github.actor }}
+
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

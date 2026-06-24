@@ -12,7 +12,7 @@
       - Non-standard version format emits a warning but does not fail
 
 .NOTES
-    Run from the GHA-Core repository root:
+    Run from the GHA-CICD-Core repository root:
         Invoke-Pester .github/servicenow/Tests/Unit/Dynamics/Set-SolutionVersion.Tests.ps1
 
     Requires: Pester v5+, PowerShell 7+

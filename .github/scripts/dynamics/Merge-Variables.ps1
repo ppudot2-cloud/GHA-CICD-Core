@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-    Merges global (GHA-Core) and project (GHA-Dynamics) pipeline variables with
+    Merges global (GHA-CICD-Core) and project (GHA-Dynamics) pipeline variables with
     governance enforcement: project variables cannot override protected global keys.
 
 .DESCRIPTION
     Called at the start of every reusable workflow (build, deploy, rollback).
     Reads two YAML config files:
-      1. GHA-Core/.github/config/global-vars.yml  — global defaults + protected_keys
+      1. GHA-CICD-Core/.github/config/global-vars.yml  — global defaults + protected_keys
       2. <caller>/.github/config/project-vars.yml — project-specific values
 
     Merge rules:
@@ -22,7 +22,7 @@
     shadowing of the OIDC-provided identity.
 
 .PARAMETER GlobalVarsPath
-    Absolute or relative path to global-vars.yml (GHA-Core checkout).
+    Absolute or relative path to global-vars.yml (GHA-CICD-Core checkout).
 
 .PARAMETER ProjectVarsPath
     Absolute or relative path to project-vars.yml (caller repo checkout).
@@ -130,7 +130,7 @@ $AZURE_IDENTITY_KEYS = @(
 )
 
 # ── Load global vars ──────────────────────────────────────────────────────────
-Write-Header "Loading global variables from GHA-Core"
+Write-Header "Loading global variables from GHA-CICD-Core"
 Write-Host "  Path: $GlobalVarsPath"
 
 $protectedKeys = Parse-SimpleYaml -path $GlobalVarsPath -section 'protected_keys'
@@ -173,7 +173,7 @@ if ($violations.Count -gt 0) {
     Write-Host "║  VARIABLE GOVERNANCE VIOLATION                                       ║"
     Write-Host "╠══════════════════════════════════════════════════════════════════════╣"
     Write-Host "║  The following keys in project-vars.yml conflict with protected       ║"
-    Write-Host "║  global variables defined in GHA-Core/global-vars.yml.               ║"
+    Write-Host "║  global variables defined in GHA-CICD-Core/global-vars.yml.               ║"
     Write-Host "║  Remove these keys from project-vars.yml to proceed.                 ║"
     Write-Host "╚══════════════════════════════════════════════════════════════════════╝"
     foreach ($v in $violations) { Write-Host $v }

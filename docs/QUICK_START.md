@@ -9,7 +9,7 @@
 
 Before starting you need:
 
-- Two GitHub repositories in your org: `GHA-Core` and `GHA-Dynamics`
+- Two GitHub repositories in your org: `GHA-CICD-Core` and `GHA-Dynamics`
 - Azure subscription with an App Registration (for OIDC + Key Vault)
 - Azure Key Vault containing `pp-app-id`, `pp-client-secret`, `pp-tenant-id`
 - Power Platform environments: Dev, Intg, UAT, FRS, Perf, Prod (and optionally a Sandbox)
@@ -53,7 +53,7 @@ Setting `SERVICENOW_ENABLED=true` activates the full ServiceNow CR lifecycle (op
 
 | Secret | Value |
 |---|---|
-| `GHATOKEN` | Personal Access Token with `repo` scope (needs access to the private GHA-Core repo) |
+| `GHATOKEN` | Personal Access Token with `repo` scope (needs access to the private GHA-CICD-Core repo) |
 
 ---
 

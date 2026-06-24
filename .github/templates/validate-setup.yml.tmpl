@@ -1,0 +1,383 @@
+# =============================================================================
+# WORKFLOW: Validate Setup
+# =============================================================================
+# Run this once after project onboarding to verify OIDC + Key Vault connectivity
+# for each GitHub Environment before running the full build-and-deploy pipeline.
+#
+# Layer 1 — Structural checks (no environment gate):
+#   • solutions.json is valid and all registered solution folders exist
+#   • DeploymentSettings files present for all registered solutions
+#   • Required repo variables and GHATOKEN secret are set
+#
+# Layer 2 — Per-environment OIDC + KV validation:
+#   • Each environment job uses its GitHub Environment to get the correct OIDC
+#     subject: repo:{org}/{repo}:environment:{EnvName}
+#   • Logs into Azure, lists Key Vault, confirms PP-APP-ID / PP-CLIENT-SECRET /
+#     PP-TENANT-ID secrets are present
+#
+# IMPORTANT: Each GitHub Environment (Dev, Intg, UAT, FRS, Perf, Prod) must have
+# a Federated Credential on the Azure App Registration with subject:
+#   repo:{org}/{this-repo}:environment:{EnvName}
+# =============================================================================
+
+name: Validate Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      environments:
+        description: >
+          Comma-separated environments to validate.
+          Example: "Dev,Intg,UAT" or "Dev,Intg,UAT,FRS,Perf,Prod" (default = all)
+        required: false
+        default: 'Dev,Intg,UAT,FRS,Perf,Prod'
+        type: string
+
+jobs:
+  # ============================================================================
+  # Layer 1 — Structural checks (no environment gate needed)
+  # ============================================================================
+  validate-structure:
+    name: "🔍 Structural Checks"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate solutions.json
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'solutions.json')) {
+            Write-Error "::error::solutions.json not found — run onboard-project to scaffold the repo"
+            exit 1
+          }
+          $json = Get-Content 'solutions.json' -Raw | ConvertFrom-Json
+          Write-Host "✅ solutions.json valid — $($json.solutions.Count) solution(s) registered"
+
+          $errors = 0
+          foreach ($sol in $json.solutions) {
+            if (-not (Test-Path $sol.folder)) {
+              Write-Host "::error::Solution folder not found: $($sol.folder)"
+              $errors++
+            } else {
+              Write-Host "  ✅ $($sol.name) → $($sol.folder)"
+            }
+            foreach ($env in @('dev','intg','uat','frs','perf','prod')) {
+              $dsPath = $sol.deploymentSettings.$env
+              if ($dsPath -and -not (Test-Path $dsPath)) {
+                Write-Host "::error::Missing DeploymentSettings: $dsPath"
+                $errors++
+              }
+            }
+          }
+          if ($errors -gt 0) { exit 1 }
+          Write-Host "✅ All solution folders and DeploymentSettings files present"
+
+      - name: Check required repo variables and secrets
+        shell: bash
+        env:
+          AZURE_CLIENT_ID:       ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID:       ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_KEY_VAULT_NAME:  ${{ vars.AZURE_KEY_VAULT_NAME }}
+          PP_DEV_URL:            ${{ vars.PP_DEV_URL }}
+          PP_INTG_URL:           ${{ vars.PP_INTG_URL }}
+          PP_UAT_URL:            ${{ vars.PP_UAT_URL }}
+          PP_FRS_URL:            ${{ vars.PP_FRS_URL }}
+          PP_PERF_URL:           ${{ vars.PP_PERF_URL }}
+          PP_PROD_URL:           ${{ vars.PP_PROD_URL }}
+          PP_SDBX_URL:           ${{ vars.PP_SDBX_URL }}
+          GHATOKEN_SET:          ${{ secrets.GHATOKEN != '' }}
+        run: |
+          ERRORS=0
+          check_var() {
+            if [ -z "${!1}" ]; then
+              echo "::error::Required repo variable $1 is not set (Settings → Variables → Actions)"
+              ERRORS=$((ERRORS+1))
+            else
+              echo "  ✅ $1"
+            fi
+          }
+          echo "── Azure identity ───────────────────────────────────────────"
+          check_var AZURE_CLIENT_ID
+          check_var AZURE_TENANT_ID
+          check_var AZURE_SUBSCRIPTION_ID
+          check_var AZURE_KEY_VAULT_NAME
+          echo "── Power Platform URLs ──────────────────────────────────────"
+          check_var PP_DEV_URL
+          check_var PP_INTG_URL
+          check_var PP_UAT_URL
+          check_var PP_FRS_URL
+          check_var PP_PERF_URL
+          check_var PP_PROD_URL
+          check_var PP_SDBX_URL
+          echo "── Secrets ──────────────────────────────────────────────────"
+          if [ "$GHATOKEN_SET" != "true" ]; then
+            echo "::error::Required secret GHATOKEN is not set (Settings → Secrets → Actions)"
+            ERRORS=$((ERRORS+1))
+          else
+            echo "  ✅ GHATOKEN"
+          fi
+          if [ $ERRORS -gt 0 ]; then
+            echo "::error::$ERRORS required variable(s) missing — fix before running the pipeline"
+            exit 1
+          fi
+          echo "✅ All required variables and secrets are set"
+
+  # ============================================================================
+  # Layer 2 — OIDC + Key Vault validation per environment
+  # Each job runs in its GitHub Environment to get the correct OIDC subject.
+  # ============================================================================
+  validate-dev:
+    name: "🔐 Validate | Dev"
+    needs: validate-structure
+    if: needs.validate-structure.result == 'success' && contains(inputs.environments, 'Dev')
+    runs-on: ubuntu-latest
+    environment: Dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify Key Vault access
+        shell: bash
+        run: |
+          COUNT=$(az keyvault secret list --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --query "length(@)" --output tsv 2>&1) || {
+            echo "::error::Cannot list secrets in Key Vault '${{ vars.AZURE_KEY_VAULT_NAME }}'."
+            echo "::error::Verify the Dev Federated Credential subject: repo:${{ github.repository }}:environment:Dev"
+            exit 1
+          }
+          echo "✅ Key Vault accessible from Dev OIDC context ($COUNT secrets visible)"
+      - name: Verify PP credentials in Key Vault
+        shell: bash
+        run: |
+          for secret in PP-APP-ID PP-CLIENT-SECRET PP-TENANT-ID; do
+            az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name "$secret" --query "name" --output tsv 2>/dev/null || {
+              echo "::error::Secret '$secret' not found in '${{ vars.AZURE_KEY_VAULT_NAME }}' — add it to Key Vault"
+              exit 1
+            }
+            echo "  ✅ $secret"
+          done
+
+  validate-intg:
+    name: "🔐 Validate | Intg"
+    needs: validate-structure
+    if: needs.validate-structure.result == 'success' && contains(inputs.environments, 'Intg')
+    runs-on: ubuntu-latest
+    environment: Intg
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify Key Vault access
+        shell: bash
+        run: |
+          COUNT=$(az keyvault secret list --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --query "length(@)" --output tsv 2>&1) || {
+            echo "::error::Cannot list secrets — verify Intg Federated Credential subject: repo:${{ github.repository }}:environment:Intg"
+            exit 1
+          }
+          echo "✅ Key Vault accessible from Intg OIDC context ($COUNT secrets visible)"
+      - name: Verify PP credentials in Key Vault
+        shell: bash
+        run: |
+          for secret in PP-APP-ID PP-CLIENT-SECRET PP-TENANT-ID; do
+            az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name "$secret" --query "name" --output tsv 2>/dev/null || {
+              echo "::error::Secret '$secret' not found in Key Vault"
+              exit 1
+            }
+            echo "  ✅ $secret"
+          done
+
+  validate-uat:
+    name: "🔐 Validate | UAT"
+    needs: validate-structure
+    if: needs.validate-structure.result == 'success' && contains(inputs.environments, 'UAT')
+    runs-on: ubuntu-latest
+    environment: UAT
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify Key Vault access
+        shell: bash
+        run: |
+          COUNT=$(az keyvault secret list --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --query "length(@)" --output tsv 2>&1) || {
+            echo "::error::Cannot list secrets — verify UAT Federated Credential subject: repo:${{ github.repository }}:environment:UAT"
+            exit 1
+          }
+          echo "✅ Key Vault accessible from UAT OIDC context ($COUNT secrets visible)"
+      - name: Verify PP credentials in Key Vault
+        shell: bash
+        run: |
+          for secret in PP-APP-ID PP-CLIENT-SECRET PP-TENANT-ID; do
+            az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name "$secret" --query "name" --output tsv 2>/dev/null || {
+              echo "::error::Secret '$secret' not found in Key Vault"
+              exit 1
+            }
+            echo "  ✅ $secret"
+          done
+
+  validate-frs:
+    name: "🔐 Validate | FRS"
+    needs: validate-structure
+    if: needs.validate-structure.result == 'success' && contains(inputs.environments, 'FRS')
+    runs-on: ubuntu-latest
+    environment: FRS
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify Key Vault access
+        shell: bash
+        run: |
+          COUNT=$(az keyvault secret list --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --query "length(@)" --output tsv 2>&1) || {
+            echo "::error::Cannot list secrets — verify FRS Federated Credential subject: repo:${{ github.repository }}:environment:FRS"
+            exit 1
+          }
+          echo "✅ Key Vault accessible from FRS OIDC context ($COUNT secrets visible)"
+      - name: Verify PP credentials in Key Vault
+        shell: bash
+        run: |
+          for secret in PP-APP-ID PP-CLIENT-SECRET PP-TENANT-ID; do
+            az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name "$secret" --query "name" --output tsv 2>/dev/null || {
+              echo "::error::Secret '$secret' not found in Key Vault"
+              exit 1
+            }
+            echo "  ✅ $secret"
+          done
+
+  validate-perf:
+    name: "🔐 Validate | Perf"
+    needs: validate-structure
+    if: needs.validate-structure.result == 'success' && contains(inputs.environments, 'Perf')
+    runs-on: ubuntu-latest
+    environment: Perf
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify Key Vault access
+        shell: bash
+        run: |
+          COUNT=$(az keyvault secret list --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --query "length(@)" --output tsv 2>&1) || {
+            echo "::error::Cannot list secrets — verify Perf Federated Credential subject: repo:${{ github.repository }}:environment:Perf"
+            exit 1
+          }
+          echo "✅ Key Vault accessible from Perf OIDC context ($COUNT secrets visible)"
+      - name: Verify PP credentials in Key Vault
+        shell: bash
+        run: |
+          for secret in PP-APP-ID PP-CLIENT-SECRET PP-TENANT-ID; do
+            az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name "$secret" --query "name" --output tsv 2>/dev/null || {
+              echo "::error::Secret '$secret' not found in Key Vault"
+              exit 1
+            }
+            echo "  ✅ $secret"
+          done
+
+  validate-prod:
+    name: "🔐 Validate | Prod"
+    needs: validate-structure
+    if: needs.validate-structure.result == 'success' && contains(inputs.environments, 'Prod')
+    runs-on: ubuntu-latest
+    environment: Prod
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify Key Vault access
+        shell: bash
+        run: |
+          COUNT=$(az keyvault secret list --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --query "length(@)" --output tsv 2>&1) || {
+            echo "::error::Cannot list secrets — verify Prod Federated Credential subject: repo:${{ github.repository }}:environment:Prod"
+            exit 1
+          }
+          echo "✅ Key Vault accessible from Prod OIDC context ($COUNT secrets visible)"
+      - name: Verify PP credentials in Key Vault
+        shell: bash
+        run: |
+          for secret in PP-APP-ID PP-CLIENT-SECRET PP-TENANT-ID; do
+            az keyvault secret show --vault-name "${{ vars.AZURE_KEY_VAULT_NAME }}" --name "$secret" --query "name" --output tsv 2>/dev/null || {
+              echo "::error::Secret '$secret' not found in Key Vault"
+              exit 1
+            }
+            echo "  ✅ $secret"
+          done
+
+  # ============================================================================
+  # Summary (always runs)
+  # ============================================================================
+  validate-summary:
+    name: "📋 Validation Summary"
+    needs: [validate-structure, validate-dev, validate-intg, validate-uat, validate-frs, validate-perf, validate-prod]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write summary
+        shell: bash
+        run: |
+          struct="${{ needs.validate-structure.result }}"
+          dev="${{ needs.validate-dev.result }}"
+          intg="${{ needs.validate-intg.result }}"
+          uat="${{ needs.validate-uat.result }}"
+          frs="${{ needs.validate-frs.result }}"
+          perf="${{ needs.validate-perf.result }}"
+          prod="${{ needs.validate-prod.result }}"
+
+          icon() { [ "$1" = "success" ] && echo "✅" || { [ "$1" = "skipped" ] && echo "⏭️" || echo "❌"; } }
+
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🔐 Setup Validation Summary
+
+          | Layer | Check | Result |
+          |-------|-------|--------|
+          | Layer 1 | Structural (solutions.json, files, vars) | $(icon $struct) $struct |
+          | Layer 2 | Dev OIDC + Key Vault | $(icon $dev) $dev |
+          | Layer 2 | Intg OIDC + Key Vault | $(icon $intg) $intg |
+          | Layer 2 | UAT OIDC + Key Vault | $(icon $uat) $uat |
+          | Layer 2 | FRS OIDC + Key Vault | $(icon $frs) $frs |
+          | Layer 2 | Perf OIDC + Key Vault | $(icon $perf) $perf |
+          | Layer 2 | Prod OIDC + Key Vault | $(icon $prod) $prod |
+
+          **Environments requested:** \`${{ inputs.environments }}\`
+
+          > ⏭️ skipped = environment was not included in the \`environments\` input
+          > ❌ failure = OIDC subject mismatch, Key Vault access denied, or missing secrets
+          EOF

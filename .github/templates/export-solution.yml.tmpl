@@ -1,0 +1,275 @@
+# =============================================================================
+# WORKFLOW: Export Solution(s) from Sandbox → GitHub Branch
+# =============================================================================
+# Trigger  : Manual (workflow_dispatch) — run by makers after customising in SDBX
+# Purpose  : Exports one or more solutions from the sandbox environment,
+#            unpacks them to source files, exports config data (optional),
+#            resets build numbers, commits all changes to a shared feature
+#            branch, and opens a single PR to main.
+#
+# MOCK_DEPLOY MODE (mock_deploy=true):
+#   Performs a round-trip pack → unpack from existing source (no live Dataverse).
+#   Useful for verifying your source is packable before the first real export.
+# =============================================================================
+
+name: Export Solution from Sandbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      solutions:
+        description: >
+          Which solution(s) to export.
+          "all" = every solution in solutions.json (default).
+          Comma-separated subset: "MySolution" or "SolA, SolB".
+        required: false
+        default: 'all'
+
+      branch_name:
+        description: 'Feature branch to commit to (blank = auto-generate)'
+        required: false
+        default: ''
+
+      create_pr:
+        description: 'Open a Pull Request to main after all exports complete'
+        required: false
+        default: true
+        type: boolean
+
+      commit_message:
+        description: 'Git commit message prefix'
+        required: false
+        default: 'chore: export solution(s) from sandbox'
+
+      export_config_data:
+        description: 'Export configuration migration data for each solution'
+        required: false
+        default: false
+        type: boolean
+
+      publish_before_export:
+        description: 'Publish customizations in sandbox before exporting'
+        required: false
+        default: true
+        type: boolean
+
+      mock_deploy:
+        description: 'Dry-run — simulate the full export flow. No PP credentials required.'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  setup:
+    name: "🔍 Resolve Solutions & Branch"
+    runs-on: ubuntu-latest
+    outputs:
+      matrix:          ${{ steps.resolve.outputs.matrix }}
+      solution_list:   ${{ steps.resolve.outputs.solution_list }}
+      solution_count:  ${{ steps.resolve.outputs.solution_count }}
+      branch_name:     ${{ steps.set-branch.outputs.branch_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout GHA-CICD-Core CI scripts
+        uses: actions/checkout@v4
+        with:
+          repository: ppudot2-cloud/GHA-CICD-Core
+          ref: {{GHA_CORE_REF}}
+          path: .ci
+          token: ${{ secrets.GHATOKEN }}
+
+      - name: Resolve solution list
+        id: resolve
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/dynamics/Resolve-SolutionMatrix.ps1 `
+            -InputSolutions '${{ inputs.solutions || 'all' }}' `
+            -PpSolutionName '${{ vars.PP_SOLUTION_NAME }}'
+
+      - name: Set branch name
+        id: set-branch
+        shell: pwsh
+        run: |
+          $requested = '${{ inputs.branch_name }}'.Trim()
+          if ($requested) {
+            $branch = $requested
+          } else {
+            $date   = Get-Date -Format 'yyyyMMdd'
+            $branch = "export/sdbx-$date-${{ github.run_number }}"
+          }
+          "branch_name=$branch" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Branch: $branch"
+
+  export:
+    name: "📤 Export | ${{ matrix.solution }}"
+    needs: setup
+    if: needs.setup.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+      max-parallel: 1
+      fail-fast: false
+
+    env:
+      SOLUTION:        ${{ matrix.solution }}
+      BRANCH_NAME:     ${{ needs.setup.outputs.branch_name }}
+      SOLUTION_FOLDER: src/solutions/${{ matrix.solution }}
+      GHA_CORE_PAT:    ${{ secrets.GHATOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref:        main
+          fetch-depth: 0
+          token:      ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Azure login & AKV credential fetch (reveille)
+        if: inputs.mock_deploy != true
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@{{GHA_CORE_REF}}
+        with:
+          azure_client_id:       ${{ vars.AZURE_CLIENT_ID }}
+          azure_tenant_id:       ${{ vars.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          azure_key_vault_name:  ${{ vars.AZURE_KEY_VAULT_NAME }}
+
+      - name: Install PAC CLI
+        uses: microsoft/powerplatform-actions/actions-install@v1
+        with:
+          add-tools-to-path: true
+
+      - name: Configure git
+        shell: pwsh
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          $branch = '${{ needs.setup.outputs.branch_name }}'
+          $exists = git ls-remote --heads origin $branch 2>&1
+          if ($exists) {
+            git checkout $branch
+            git pull origin $branch --rebase
+          } else {
+            git checkout -b $branch
+          }
+
+      - name: Validate connection — who-am-i
+        if: inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/who-am-i@v1
+        with:
+          environment-url: ${{ vars.PP_SDBX_URL }}
+          app-id:          ${{ env.PP_APP_ID }}
+          client-secret:   ${{ env.PP_CLIENT_SECRET }}
+          tenant-id:       ${{ env.PP_TENANT_ID }}
+
+      - name: "🧪 Validate connection — Simulation (mock_deploy)"
+        if: inputs.mock_deploy == true
+        shell: pwsh
+        run: Write-Host "🧪 [MOCK] Would connect to: ${{ vars.PP_SDBX_URL }}"
+
+      - name: Publish customizations before export
+        if: inputs.publish_before_export == true && inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/publish-solution@v1
+        with:
+          environment-url:     ${{ vars.PP_SDBX_URL }}
+          app-id:              ${{ env.PP_APP_ID }}
+          client-secret:       ${{ env.PP_CLIENT_SECRET }}
+          tenant-id:           ${{ env.PP_TENANT_ID }}
+          run-asynchronously:  true
+          max-async-wait-time: 60
+
+      - name: Export solution from sandbox
+        if: inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/export-solution@v1
+        with:
+          environment-url:      ${{ vars.PP_SDBX_URL }}
+          app-id:               ${{ env.PP_APP_ID }}
+          client-secret:        ${{ env.PP_CLIENT_SECRET }}
+          tenant-id:            ${{ env.PP_TENANT_ID }}
+          solution-name:        ${{ matrix.solution }}
+          solution-output-file: "out/${{ matrix.solution }}.zip"
+          managed:              false
+
+      - name: "🧪 Pack existing source (round-trip test, mock_deploy)"
+        if: inputs.mock_deploy == true
+        uses: microsoft/powerplatform-actions/pack-solution@v1
+        with:
+          solution-folder: "src/solutions/${{ matrix.solution }}"
+          solution-file:   "out/${{ matrix.solution }}.zip"
+          solution-type:   "Unmanaged"
+
+      - name: Unpack solution to source
+        if: inputs.mock_deploy != true
+        uses: microsoft/powerplatform-actions/unpack-solution@v1
+        with:
+          solution-file:   "out/${{ matrix.solution }}.zip"
+          solution-folder: "src/solutions/${{ matrix.solution }}"
+          solution-type:   "Unmanaged"
+          overwrite-files: true
+
+      - name: Commit and push changes
+        if: inputs.mock_deploy != true
+        shell: pwsh
+        run: |
+          git add --all
+          $status = git status --porcelain
+          if (-not $status) {
+            Write-Host "ℹ️  No changes to commit for ${{ matrix.solution }}"
+          } else {
+            $msg = "${{ inputs.commit_message }} [${{ matrix.solution }}]"
+            git commit -m $msg
+            git push origin '${{ needs.setup.outputs.branch_name }}' --set-upstream
+          }
+
+      - name: "🧪 Commit dry-run — Simulation (mock_deploy)"
+        if: inputs.mock_deploy == true
+        shell: pwsh
+        run: |
+          & .ci/.github/scripts/dynamics/Invoke-ExportCommitSim.ps1 `
+            -SolutionName         '${{ matrix.solution }}' `
+            -BranchName           '${{ needs.setup.outputs.branch_name }}' `
+            -CommitMessagePrefix  '${{ inputs.commit_message }}' `
+            -CreatePr             ([System.Convert]::ToBoolean('${{ inputs.create_pr }}'))
+
+  create-pr:
+    name: "🔀 Create Pull Request"
+    needs: [setup, export]
+    if: needs.export.result == 'success' && inputs.create_pr == true && inputs.mock_deploy != true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.branch_name }}
+
+      - name: Create Pull Request
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $branch  = '${{ needs.setup.outputs.branch_name }}'
+          $solList = '${{ needs.setup.outputs.solution_list }}'
+          $prTitle = "chore: export solutions from sandbox [$solList]"
+          $prBody  = @"
+          ## Auto-generated Export PR
+
+          **Solutions exported:** $solList
+          **Source environment:** ${{ vars.PP_SDBX_URL }}
+          **Run:** #${{ github.run_number }}
+          **Branch:** $branch
+
+          Review changes, resolve conflicts if any, then merge to main.
+          "@
+
+          gh pr create `
+            --title $prTitle `
+            --body  $prBody `
+            --head  $branch `
+            --base  main `
+            --label "export,automated" `
+            2>&1 | Write-Host

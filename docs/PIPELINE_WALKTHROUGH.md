@@ -131,8 +131,8 @@ PIPELINE 2 — deploy-prod.yml
 - `actions/checkout@v4` with `fetch-depth: 0` (full history)
 - Checks out the GHA-Dynamics repo (the calling repo) onto the runner
 
-#### Step 2 — Checkout GHA-Core CI scripts
-- `actions/checkout@v4` targeting `ppudot2-cloud/GHA-Core` at `ref: main`
+#### Step 2 — Checkout GHA-CICD-Core CI scripts
+- `actions/checkout@v4` targeting `ppudot2-cloud/GHA-CICD-Core` at `ref: main`
 - Authenticated via `secrets.GHATOKEN`
 - Checks out to path `.ci/` in the runner workspace
 - Provides all PowerShell scripts, composite actions, global-vars.yml, and the ServiceNow module
@@ -162,7 +162,7 @@ PIPELINE 2 — deploy-prod.yml
 
 ### Job: 📤 Export — per solution (matrix)
 
-**Defined in:** `GHA-Core/_stage-export.yml` → `jobs.export`
+**Defined in:** `GHA-CICD-Core/_stage-export.yml` → `jobs.export`
 **Runs on:** `ubuntu-latest` (one runner per solution, in parallel)
 **Condition:** `if: !inputs.skip_export` — skipped entirely when `skip_export=true` or triggered by push to `feature/**`
 **Purpose:** Export the unmanaged solution from the Power Platform sandbox, unpack it, and upload the source tree as a GitHub artifact for the build stage to consume.
@@ -172,12 +172,12 @@ Full details in [Shared Action Reference: Reveille](#shared-action-reference-rev
 At this stage: `jfrog_enabled=false` (build hasn't run yet, no upload needed), `servicenow_enabled=false`.
 
 #### Step 2 — Install PAC CLI
-- Calls `ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main`
+- Calls `ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@main`
 - Runs `microsoft/powerplatform-actions/actions-install@v1`
 - Adds PAC CLI to `$PATH` so subsequent steps can call `pac solution export`
 
 #### Step 3 — Export Solution
-- Calls `ppudot2-cloud/GHA-Core/.github/actions/dynamics/export-solution@main`
+- Calls `ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/export-solution@main`
 - **Real mode:** `pac solution export --name <solution_name> --path export-src/<name>.zip --environment <PP_SDBX_URL>`
   - Exports the unmanaged ZIP from the sandbox
   - Runs `pac solution unpack --zipfile export-src/<name>.zip --folder export-src/<name>/ --packageType Unmanaged`
@@ -195,7 +195,7 @@ At this stage: `jfrog_enabled=false` (build hasn't run yet, no upload needed), `
 
 ### Job: 📤 Commit pipeline context
 
-**Defined in:** `GHA-Core/_stage-export.yml` → `jobs.commit`
+**Defined in:** `GHA-CICD-Core/_stage-export.yml` → `jobs.commit`
 **Condition:** `if: always() && (needs.export.result == 'success' || needs.export.result == 'skipped')`
 **Runs on:** `ubuntu-latest`
 **Purpose:** Create the feature branch (normal mode) or write to the existing branch (skip_export mode), copy exported sources, and write `pipeline-context.json` so Pipeline 2 can locate these build artifacts.
@@ -251,7 +251,7 @@ At this stage: `jfrog_enabled=false` (build hasn't run yet, no upload needed), `
 
 ### Job: 🏗️ Build — per solution (matrix)
 
-**Defined in:** `GHA-Core/_stage-build.yml` → `jobs.build` → calls `_job-build.yml`
+**Defined in:** `GHA-CICD-Core/_stage-build.yml` → `jobs.build` → calls `_job-build.yml`
 **Runs on:** `ubuntu-latest` (one runner per solution, in parallel via `strategy.matrix`)
 **Purpose:** Version-stamp, pack, Solution Checker, config-data export, upload to GitHub artifacts, archive to JFrog.
 
@@ -275,7 +275,7 @@ Full details in [Shared Action Reference: Reveille](#shared-action-reference-rev
 - Outputs `folder` to `$GITHUB_OUTPUT`
 
 #### Step 5 — Pack Solution
-Calls `ppudot2-cloud/GHA-Core/.github/actions/dynamics/pack-solution@main`. Internal steps:
+Calls `ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pack-solution@main`. Internal steps:
 
 **5a — Read solution version** (`Set-SolutionVersion.ps1`)
 - Reads `<source_folder>/Other/Solution.xml`
@@ -307,7 +307,7 @@ Calls `ppudot2-cloud/GHA-Core/.github/actions/dynamics/pack-solution@main`. Inte
 - **Mock mode:** Second call to `New-MockSolutionZip.ps1` with `PackageType: Managed`
 
 #### Step 6 — Solution Checker
-Calls `ppudot2-cloud/GHA-Core/.github/actions/dynamics/solution-checker@main`. Internal steps:
+Calls `ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/solution-checker@main`. Internal steps:
 
 **6a — Run Solution Checker — Real** (`if: mock_deploy != 'true'`)
 - `microsoft/powerplatform-actions/check-solution@v1`
@@ -331,7 +331,7 @@ Calls `ppudot2-cloud/GHA-Core/.github/actions/dynamics/solution-checker@main`. I
 - No PP connection required
 
 #### Step 7 — Export Config Data
-Calls `ppudot2-cloud/GHA-Core/.github/actions/dynamics/export-config-data@main`
+Calls `ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/export-config-data@main`
 - **Skipped if** `data_schema_file` input is empty
 - **Real mode:** `microsoft/powerplatform-actions/export-data@v1` using the schema XML; outputs `config-data/<name>-data.zip`
 - **Mock mode:** `Export-ConfigDataSim.ps1` — validates schema XML well-formedness, creates placeholder ZIP
@@ -345,7 +345,7 @@ Calls `ppudot2-cloud/GHA-Core/.github/actions/dynamics/export-config-data@main`
 
 #### Step 9 — JFrog Upload
 - **Condition:** `if: inputs.jfrog_url != ''` (skipped if JFrog not configured)
-- Calls `ppudot2-cloud/GHA-Core/.github/actions/dynamics/jfrog-upload@main`
+- Calls `ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/jfrog-upload@main`
 - Calls `Invoke-JFrogAction.ps1 upload`
 - Uploads managed ZIP, unmanaged ZIP, and SARIF to Artifactory path `{repo}/{name}/{version}/`
 - Sets artifact properties: `solution.name`, `run.number`, `build.timestamp`
@@ -361,7 +361,7 @@ Calls `ppudot2-cloud/GHA-Core/.github/actions/dynamics/export-config-data@main`
 
 ### Job: 🏗️ Validate Pipeline Config
 
-**Defined in:** `GHA-Core/_stage-build.yml` → `jobs.validate`
+**Defined in:** `GHA-CICD-Core/_stage-build.yml` → `jobs.validate`
 **Condition:** `if: needs.build.result == 'success'` — runs after ALL build jobs pass
 **Purpose:** Print all pipeline toggles, environment URLs, and secret/service-connection status to the GitHub Actions log and step summary.
 
@@ -483,7 +483,7 @@ Identical to Dev: Reveille → Install PAC CLI → Download solution artifacts.
 
 ### Job: 🔀 Open PR → main
 
-**Defined in:** `GHA-Core/_stage-deploy-chain.yml` → `jobs.create-pr` (runs **inside** the deploy chain, not as a separate job in `build-and-deploy.yml`)
+**Defined in:** `GHA-CICD-Core/_stage-deploy-chain.yml` → `jobs.create-pr` (runs **inside** the deploy chain, not as a separate job in `build-and-deploy.yml`)
 **Condition:** `inputs.feature_branch != '' && needs.deploy-uat.result == 'success'`
 **Purpose:** Create the PR that triggers Pipeline 2. Merging this PR lands `pipeline-context.json` on main, which fires `deploy-prod.yml`.
 
@@ -507,8 +507,8 @@ Identical to Dev: Reveille → Install PAC CLI → Download solution artifacts.
 #### Step 1 — Checkout repository
 Standard checkout of GHA-Dynamics.
 
-#### Step 2 — Checkout GHA-Core CI scripts
-Checks out GHA-Core to `.ci/` to access `Write-PipelineSummary.ps1`.
+#### Step 2 — Checkout GHA-CICD-Core CI scripts
+Checks out GHA-CICD-Core to `.ci/` to access `Write-PipelineSummary.ps1`.
 
 #### Step 3 — Download job summary records
 - `actions/download-artifact@v4` with `pattern: job-summary-*`
@@ -625,8 +625,8 @@ Identical to other deploy jobs. Downloads from Pipeline 1 run via `needs.read-co
 - `actions/checkout@v4` with `fetch-depth: 0`
 - Checks out the GHA-Dynamics repo so scripts can access `solutions.json`, `deployment-settings/`, etc.
 
-#### 2 — Checkout GHA-Core CI scripts
-- `actions/checkout@v4` targeting `ppudot2-cloud/GHA-Core@main`
+#### 2 — Checkout GHA-CICD-Core CI scripts
+- `actions/checkout@v4` targeting `ppudot2-cloud/GHA-CICD-Core@main`
 - Authenticated via `env.GHA_CORE_PAT` (callers must expose this secret via `env: GHA_CORE_PAT`)
 - **Path:** `.ci/` in the workspace
 - Makes available:
@@ -662,7 +662,7 @@ Identical to other deploy jobs. Downloads from Pipeline 1 run via `needs.read-co
 #### 5 — Merge global and project variables
 - Calls `Merge-Variables.ps1 -GlobalVarsPath .ci/.github/variables/dynamics/global-vars.yml -ProjectVarsPath .github/config/project-vars.yml`
 - **What it does:**
-  - Reads `global-vars.yml` (org-wide defaults from GHA-Core)
+  - Reads `global-vars.yml` (org-wide defaults from GHA-CICD-Core)
   - Reads `project-vars.yml` (project overrides from GHA-Dynamics)
   - Checks each project key against `protected_keys` list — **fails immediately if a project attempts to override a protected key**
   - Merges: project values override global values for non-protected keys
@@ -894,4 +894,4 @@ All steps run inside a `try/catch` block. On exception, the catch block runs inl
 
 ---
 
-*Generated from live YAML sources in GHA-Core + GHA-Dynamics. For the interactive visual companion, open [gha_cicd_e2e_flow.html](./gha_cicd_e2e_flow.html).*
+*Generated from live YAML sources in GHA-CICD-Core + GHA-Dynamics. For the interactive visual companion, open [gha_cicd_e2e_flow.html](./gha_cicd_e2e_flow.html).*

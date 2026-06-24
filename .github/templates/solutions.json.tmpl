@@ -1,0 +1,42 @@
+{
+  "_readme": [
+    "solutions.json — Power Platform solution registry for this repo.",
+    "",
+    "SINGLE-SOLUTION REPO  : Add exactly one entry.",
+    "MULTI-SOLUTION REPO   : Add all solutions. Use deployOrder to control",
+    "                        the sequential import sequence (1 = first).",
+    "",
+    "Fields per solution:",
+    "  name              — unique solution name matching the PP environment",
+    "  folder            — relative path to unpacked solution source",
+    "  deployOrder       — integer controlling sequential deploy sequence (required)",
+    "  dependsOn         — optional metadata only; documents logical prerequisites",
+    "                      but does NOT affect deploy order (use deployOrder for that)",
+    "  dataSchemaFile    — Config Migration schema XML; lives at src/solutions/{Name}/config-data-schema.xml",
+    "                      Leave empty string '' if this solution has no config migration data.",
+    "  deploymentSettings — per-environment deployment settings JSON paths.",
+    "                      Convention: src/solutions/{Name}/DeploymentSettings-{Env}.json",
+    "                      Env uses strict title case: Dev, Intg, Uat, Frs, Perf, Prod",
+    "",
+    "Tip: For a single-solution repo, set deployOrder to 1 and set",
+    "     PP_SOLUTION_NAME repo variable to match the name here."
+  ],
+  "solutions": [
+    {
+      "name": "{{SOLUTION_NAME}}",
+      "folder": "src/solutions/{{SOLUTION_NAME}}",
+      "deployOrder": {{DEPLOY_ORDER}},
+      "dependsOn": [{{DEPENDS_ON}}],
+
+      "dataSchemaFile": "src/solutions/{{SOLUTION_NAME}}/config-data-schema.xml",
+      "deploymentSettings": {
+        "dev":  "src/solutions/{{SOLUTION_NAME}}/DeploymentSettings-Dev.json",
+        "intg": "src/solutions/{{SOLUTION_NAME}}/DeploymentSettings-Intg.json",
+        "uat":  "src/solutions/{{SOLUTION_NAME}}/DeploymentSettings-Uat.json",
+        "frs":  "src/solutions/{{SOLUTION_NAME}}/DeploymentSettings-Frs.json",
+        "perf": "src/solutions/{{SOLUTION_NAME}}/DeploymentSettings-Perf.json",
+        "prod": "src/solutions/{{SOLUTION_NAME}}/DeploymentSettings-Prod.json"
+      }
+    }
+  ]
+}

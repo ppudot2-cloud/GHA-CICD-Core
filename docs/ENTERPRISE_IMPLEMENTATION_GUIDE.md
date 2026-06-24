@@ -1,5 +1,5 @@
 # Enterprise Implementation Guide
-## Taking GHA-Core + GHA-Dynamics from Development to Production
+## Taking GHA-CICD-Core + GHA-Dynamics from Development to Production
 
 > **Who this is for:** Platform / DevSecOps engineers standing up this pipeline system for the first time in an enterprise environment.
 > **What this covers:** Every configuration step, every simulation to retire, every integration to wire up — in the order you should do them.
@@ -30,7 +30,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  GHA-Core  (org-wide shared library — ONE per org)       │
+│  GHA-CICD-Core  (org-wide shared library — ONE per org)       │
 │                                                          │
 │  .github/workflows/     ← reusable workflows            │
 │  .github/actions/       ← composite actions             │
@@ -62,33 +62,33 @@ Pipeline 2 (deploy-prod.yml)
   → UAT re-validation → Prod
 ```
 
-**Rule of thumb:** GHA-Core owns the logic. GHA-Dynamics owns the config. Never put logic in GHA-Dynamics — if something needs to change for all projects, change it in GHA-Core.
+**Rule of thumb:** GHA-CICD-Core owns the logic. GHA-Dynamics owns the config. Never put logic in GHA-Dynamics — if something needs to change for all projects, change it in GHA-CICD-Core.
 
 ---
 
 ## 2. Repository Setup
 
-### 2.1 Fork or mirror GHA-Core into your GitHub organisation
+### 2.1 Fork or mirror GHA-CICD-Core into your GitHub organisation
 
-GHA-Core must live in your own GitHub org — callers reference it as `your-org/GHA-Core`.
+GHA-CICD-Core must live in your own GitHub org — callers reference it as `your-org/GHA-CICD-Core`.
 
 ```bash
 # If starting from this repo:
-git clone https://github.com/ppudot2-cloud/GHA-Core.git
-cd GHA-Core
-git remote set-url origin https://github.com/YOUR-ORG/GHA-Core.git
+git clone https://github.com/ppudot2-cloud/GHA-CICD-Core.git
+cd GHA-CICD-Core
+git remote set-url origin https://github.com/YOUR-ORG/GHA-CICD-Core.git
 git push origin main
 ```
 
-Make GHA-Core **private** — it contains org-wide pipeline logic and the ServiceNow PS module.
+Make GHA-CICD-Core **private** — it contains org-wide pipeline logic and the ServiceNow PS module.
 
-### 2.2 Update caller references in GHA-Core
+### 2.2 Update caller references in GHA-CICD-Core
 
-Every `uses:` reference inside GHA-Core workflows and actions points to itself. After forking, update the org name:
+Every `uses:` reference inside GHA-CICD-Core workflows and actions points to itself. After forking, update the org name:
 
 ```bash
-# In GHA-Core — update all self-references
-grep -r "ppudot2-cloud/GHA-Core" .github/ --include="*.yml" -l
+# In GHA-CICD-Core — update all self-references
+grep -r "ppudot2-cloud/GHA-CICD-Core" .github/ --include="*.yml" -l
 # For each file found, replace ppudot2-cloud with YOUR-ORG
 ```
 
@@ -99,16 +99,16 @@ grep -r "ppudot2-cloud/GHA-Core" .github/ --include="*.yml" -l
 gh repo create YOUR-ORG/GHA-Dynamics --private
 ```
 
-Update all `uses:` in GHA-Dynamics workflows to point to `YOUR-ORG/GHA-Core`:
+Update all `uses:` in GHA-Dynamics workflows to point to `YOUR-ORG/GHA-CICD-Core`:
 
 ```bash
 cd GHA-Dynamics
-sed -i 's|ppudot2-cloud/GHA-Core|YOUR-ORG/GHA-Core|g' .github/workflows/*.yml
+sed -i 's|ppudot2-cloud/GHA-CICD-Core|YOUR-ORG/GHA-CICD-Core|g' .github/workflows/*.yml
 ```
 
 ### 2.4 Create the GHA_CORE_PAT
 
-Create a Personal Access Token (or GitHub App) with `repo` scope that has read access to GHA-Core. This is used by `reveille` to check out GHA-Core on every runner.
+Create a Personal Access Token (or GitHub App) with `repo` scope that has read access to GHA-CICD-Core. This is used by `reveille` to check out GHA-CICD-Core on every runner.
 
 Prefer a **GitHub App** over a PAT in production — Apps have no expiry and are not tied to a person's account. See [GitHub Apps documentation](https://docs.github.com/en/apps/creating-github-apps).
 
@@ -362,7 +362,7 @@ For each environment (Sandbox, Dev, Intg, UAT, FRS, Perf, Prod):
 
 ### 5.3 Solution Checker Geography
 
-Set the correct geography in `global-vars.yml` in GHA-Core:
+Set the correct geography in `global-vars.yml` in GHA-CICD-Core:
 
 ```yaml
 PP_CHECKER_GEO: "UnitedStates"  # or Europe, Asia, etc.
@@ -485,7 +485,7 @@ JFROG_REPO = powerplatform-solutions
 
 **Step 5 — Configure global-vars.yml**
 
-In GHA-Core `/.github/variables/dynamics/global-vars.yml`:
+In GHA-CICD-Core `/.github/variables/dynamics/global-vars.yml`:
 
 ```yaml
 variables:
@@ -549,7 +549,7 @@ In GHA-Dynamics → Settings → Environments → [Environment name] → Environ
 
 **Step 4 — Configure ServiceNow variables**
 
-In GHA-Core `/.github/variables/service-now/` (create a `global-vars.yml` or add to project-vars):
+In GHA-CICD-Core `/.github/variables/service-now/` (create a `global-vars.yml` or add to project-vars):
 
 ```yaml
 SERVICENOWCHANGETYPE:         "standard"
@@ -684,7 +684,7 @@ Establish a team policy around `mock_deploy`:
 
 ## 9. Global Governance (global-vars.yml)
 
-`GHA-Core/.github/variables/dynamics/global-vars.yml` is the org-wide policy file. Settings here apply to every GHA-Dynamics project that consumes GHA-Core.
+`GHA-CICD-Core/.github/variables/dynamics/global-vars.yml` is the org-wide policy file. Settings here apply to every GHA-Dynamics project that consumes GHA-CICD-Core.
 
 ### Protected keys
 
@@ -747,14 +747,14 @@ Work through this checklist before calling the pipeline production-ready.
 - [ ] Key Vault soft-delete and purge protection enabled
 - [ ] Key Vault diagnostic logs enabled (audit who fetched what)
 
-### GitHub — GHA-Core
+### GitHub — GHA-CICD-Core
 
 - [ ] Repository is **private**
 - [ ] Only DevSecOps team has write access; all other teams have read
 - [ ] `main` branch protection: require PRs + required reviewers for changes to `global-vars.yml`
 - [ ] Automated tests or review for changes to `protected_keys` in `global-vars.yml`
 - [ ] `GHA_CORE_PAT` secret is a GitHub App token, not a personal PAT
-- [ ] No `mock_deploy=true` hard-coded anywhere in GHA-Core workflows
+- [ ] No `mock_deploy=true` hard-coded anywhere in GHA-CICD-Core workflows
 
 ### GitHub — GHA-Dynamics
 
@@ -797,12 +797,12 @@ Work through this checklist before calling the pipeline production-ready.
 
 ## 11. Onboarding Additional Projects
 
-Each new Power Platform project gets its own GHA-Dynamics repository. GHA-Core is shared — no changes needed.
+Each new Power Platform project gets its own GHA-Dynamics repository. GHA-CICD-Core is shared — no changes needed.
 
 ### Steps for each new project
 
 1. **Create a new GHA-Dynamics repo** from the template (or copy an existing one)
-2. **Update all `uses:` references** to point to `YOUR-ORG/GHA-Core`
+2. **Update all `uses:` references** to point to `YOUR-ORG/GHA-CICD-Core`
 3. **Create GitHub Environments** (Dev, Intg, UAT, FRS, Perf, Prod) with appropriate reviewers
 4. **Create federated credentials** for the new repo in Azure (use the same or a new App Registration depending on isolation requirements)
 5. **Set repository variables** (`AZURE_*`, `PP_*_URL`)
@@ -824,9 +824,9 @@ If projects share one Key Vault, one OIDC App Registration is sufficient. All pr
 
 But they must share the same AKV secrets (`pp-app-id`, etc.). This works when all projects target the same PP tenant with the same service account. If projects target different tenants or need different PP credentials, use separate Key Vaults.
 
-### When to fork GHA-Core
+### When to fork GHA-CICD-Core
 
-Do **not** fork GHA-Core per project. Fork it only if:
+Do **not** fork GHA-CICD-Core per project. Fork it only if:
 - You are a separate organisation that needs full ownership
 - You need to pin to a specific version (create a versioned tag strategy instead)
 - You have fundamental pipeline logic differences that cannot be handled via `global-vars.yml`

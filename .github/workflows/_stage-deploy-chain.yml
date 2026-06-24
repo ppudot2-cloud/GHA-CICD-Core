@@ -241,7 +241,7 @@ jobs:
 
     steps:
       - name: Reveille
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@main
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
@@ -251,7 +251,7 @@ jobs:
           azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@main
 
       - name: Download solution artifacts
         uses: actions/download-artifact@v4
@@ -263,7 +263,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Deploy all solutions → Dev
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@main
         with:
           solutions_json:           ${{ inputs.matrix }}
           environment_name:         ${{ fromJson(inputs.dev_config).name }}
@@ -299,7 +299,7 @@ jobs:
 
     steps:
       - name: Reveille
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@main
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
@@ -309,7 +309,7 @@ jobs:
           azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@main
 
       - name: Download solution artifacts
         uses: actions/download-artifact@v4
@@ -321,7 +321,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Deploy all solutions → Intg
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@main
         with:
           solutions_json:           ${{ inputs.matrix }}
           environment_name:         ${{ fromJson(inputs.intg_config).name }}
@@ -357,7 +357,7 @@ jobs:
 
     steps:
       - name: Reveille
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@main
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
@@ -367,7 +367,7 @@ jobs:
           azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@main
 
       - name: Download solution artifacts
         uses: actions/download-artifact@v4
@@ -379,7 +379,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Deploy all solutions → UAT
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@main
         with:
           solutions_json:           ${{ inputs.matrix }}
           environment_name:         ${{ fromJson(inputs.uat_config).name }}
@@ -415,7 +415,7 @@ jobs:
 
     steps:
       - name: Reveille
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@main
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
@@ -425,7 +425,7 @@ jobs:
           azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@main
 
       - name: Download solution artifacts
         uses: actions/download-artifact@v4
@@ -437,7 +437,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Deploy all solutions → FRS
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@main
         with:
           solutions_json:           ${{ inputs.matrix }}
           environment_name:         ${{ fromJson(inputs.frs_config).name }}
@@ -473,7 +473,7 @@ jobs:
 
     steps:
       - name: Reveille
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/reveille@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@main
         with:
           mock_deploy:            ${{ inputs.mock_deploy }}
           jfrog_enabled:          ${{ inputs.jfrog_url != '' }}
@@ -483,7 +483,7 @@ jobs:
           azure_key_vault_name:   ${{ inputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/pac-install@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@main
 
       - name: Download solution artifacts
         uses: actions/download-artifact@v4
@@ -495,7 +495,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Deploy all solutions → Perf
-        uses: ppudot2-cloud/GHA-Core/.github/actions/dynamics/deploy-all-solutions@main
+        uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@main
         with:
           solutions_json:           ${{ inputs.matrix }}
           environment_name:         ${{ fromJson(inputs.perf_config).name }}
@@ -555,11 +555,11 @@ jobs:
           fetch-depth: 0
           path:        .
 
-      # ── Checkout GHA-Core so we can call Write-Changelog.ps1 ──────────────────
-      - name: Checkout GHA-Core (changelog script)
+      # ── Checkout GHA-CICD-Core so we can call Write-Changelog.ps1 ──────────────────
+      - name: Checkout GHA-CICD-Core (changelog script)
         uses: actions/checkout@v4
         with:
-          repository: ppudot2-cloud/GHA-Core
+          repository: ppudot2-cloud/GHA-CICD-Core
           ref:        main
           token:      ${{ secrets.GHATOKEN }}
           path:       .ci

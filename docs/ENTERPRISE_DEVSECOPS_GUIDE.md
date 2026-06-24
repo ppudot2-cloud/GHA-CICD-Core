@@ -1,5 +1,5 @@
 # Enterprise DevSecOps Setup Guide
-## Power Platform CI/CD — GHA-Core + GHA-Dynamics Architecture
+## Power Platform CI/CD — GHA-CICD-Core + GHA-Dynamics Architecture
 
 > **Audience:** DevSecOps engineers setting up and maintaining the pipeline in an enterprise environment.
 > **Scope:** Azure App Registration, OIDC / Workload Identity Federation, Azure Key Vault, GitHub configuration, two-pipeline wiring, and ongoing operations.
@@ -15,7 +15,7 @@
 5. [Federated Identity Credentials — OIDC](#5-federated-identity-credentials--oidc)
 6. [Power Platform Service Principal](#6-power-platform-service-principal)
 7. [GitHub Repository Configuration](#7-github-repository-configuration)
-8. [GHA-Core Repository Setup](#8-gha-core-repository-setup)
+8. [GHA-CICD-Core Repository Setup](#8-gha-core-repository-setup)
 9. [GHA-Dynamics Repository Setup](#9-gha-dynamics-repository-setup)
 10. [solutions.json Configuration](#10-solutionsjson-configuration)
 11. [Verification Checklist](#11-verification-checklist)
@@ -30,7 +30,7 @@ The pipeline uses a **two-repo, two-pipeline** architecture:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  GHA-Core  (reusable library — your org's shared pipeline library)  │
+│  GHA-CICD-Core  (reusable library — your org's shared pipeline library)  │
 │                                                                     │
 │  .github/workflows/              ← reusable workflows (_stage-*, _job-*)  │
 │  .github/actions/dynamics/       ← composite actions (reveille, deploy-all-solutions, etc.) │
@@ -71,7 +71,7 @@ GitHub Actions Runner
   → PAC CLI uses PP credentials for all Dataverse operations
 ```
 
-**Only one GitHub Secret is needed:** `GHA_CORE_PAT` — a Personal Access Token (or GitHub App token) with `repo` scope, used to check out the private GHA-Core repository and to create pull requests.
+**Only one GitHub Secret is needed:** `GHA_CORE_PAT` — a Personal Access Token (or GitHub App token) with `repo` scope, used to check out the private GHA-CICD-Core repository and to create pull requests.
 
 ---
 
@@ -81,14 +81,14 @@ GitHub Actions Runner
 - Azure subscription with permission to create resources
 - Power Platform Admin Center access
 - GitHub organization admin (to set repo secrets/variables and environments)
-- Both repos created in GitHub: `GHA-Core` and `GHA-Dynamics`
+- Both repos created in GitHub: `GHA-CICD-Core` and `GHA-Dynamics`
 
 Set these shell variables before running any commands below — replace ALL placeholder values:
 
 ```bash
 GITHUB_ORG="your-github-org"
 GITHUB_REPO_DYNAMICS="GHA-Dynamics"
-GITHUB_REPO_CORE="GHA-Core"
+GITHUB_REPO_CORE="GHA-CICD-Core"
 
 AZURE_SUBSCRIPTION_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 AZURE_TENANT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"   # YOUR tenant, not Contoso
@@ -341,7 +341,7 @@ Set one secret on **GHA-Dynamics**:
 
 | Secret | Value | Purpose |
 |---|---|---|
-| `GHA_CORE_PAT` | PAT or GitHub App token with `repo` scope | Check out the private GHA-Core repo on the runner; create pull requests |
+| `GHA_CORE_PAT` | PAT or GitHub App token with `repo` scope | Check out the private GHA-CICD-Core repo on the runner; create pull requests |
 
 > Replace with a **GitHub App** token for production — PATs are tied to an individual user account.
 
@@ -368,14 +368,14 @@ Settings → Secrets and variables → Actions → **Variables**:
 
 ---
 
-## 8. GHA-Core Repository Setup
+## 8. GHA-CICD-Core Repository Setup
 
-GHA-Core is the shared library. It does not run pipelines itself — it is checked out by every GHA-Dynamics runner.
+GHA-CICD-Core is the shared library. It does not run pipelines itself — it is checked out by every GHA-Dynamics runner.
 
 ### 8.1 Repository structure
 
 ```
-GHA-Core/
+GHA-CICD-Core/
 ├── .github/
 │   ├── workflows/                  ← reusable workflows (MUST be at root — GitHub constraint)
 │   │   ├── _job-build.yml
@@ -412,11 +412,11 @@ GHA-Core/
 
 ### 8.2 GHA_CORE_PAT access
 
-The `GHA_CORE_PAT` secret in GHA-Dynamics must have **read access** to GHA-Core. If GHA-Core is a private repo in the same org, a classic PAT with `repo` scope on an org admin account works. Prefer a GitHub App for production.
+The `GHA_CORE_PAT` secret in GHA-Dynamics must have **read access** to GHA-CICD-Core. If GHA-CICD-Core is a private repo in the same org, a classic PAT with `repo` scope on an org admin account works. Prefer a GitHub App for production.
 
 ### 8.3 Global variables
 
-Edit `GHA-Core/.github/variables/dynamics/global-vars.yml` to set org-wide defaults and governance:
+Edit `GHA-CICD-Core/.github/variables/dynamics/global-vars.yml` to set org-wide defaults and governance:
 
 ```yaml
 # global-vars.yml — protected keys cannot be overridden by project-vars.yml
