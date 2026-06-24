@@ -173,7 +173,7 @@ jobs:
       - name: Install PyYAML
         run: pip install pyyaml --quiet
 
-      - name: Lint config files
+      - name: Validate solutions.json, deployment-settings, and project-vars.yml
         id: lint
         shell: python
         run: |
@@ -320,7 +320,7 @@ jobs:
           else:
               print(f'✅ Linted {len(solutions)} solution(s) — {len(warnings)} warning(s), 0 errors')
 
-      - name: Write lint summary
+      - name: Write config validation summary
         if: always()
         shell: python
         run: |
