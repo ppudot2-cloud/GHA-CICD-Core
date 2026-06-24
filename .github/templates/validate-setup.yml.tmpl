@@ -7,7 +7,7 @@
 # Layer 1 — Structural checks (no environment gate):
 #   • solutions.json is valid and all registered solution folders exist
 #   • DeploymentSettings files present for all registered solutions
-#   • Required repo variables and GHATOKEN secret are set
+#   • Required repo variables and GHA_CORE_PAT secret are set
 #
 # Layer 2 — Per-environment OIDC + KV validation:
 #   • Each environment job uses its GitHub Environment to get the correct OIDC
@@ -89,7 +89,7 @@ jobs:
           PP_PERF_URL:           ${{ vars.PP_PERF_URL }}
           PP_PROD_URL:           ${{ vars.PP_PROD_URL }}
           PP_SDBX_URL:           ${{ vars.PP_SDBX_URL }}
-          GHATOKEN_SET:          ${{ secrets.GHATOKEN != '' }}
+          GHA_CORE_PAT_SET:          ${{ secrets.GHA_CORE_PAT != '' }}
         run: |
           ERRORS=0
           check_var() {
@@ -114,11 +114,11 @@ jobs:
           check_var PP_PROD_URL
           check_var PP_SDBX_URL
           echo "── Secrets ──────────────────────────────────────────────────"
-          if [ "$GHATOKEN_SET" != "true" ]; then
-            echo "::error::Required secret GHATOKEN is not set (Settings → Secrets → Actions)"
+          if [ "$GHA_CORE_PAT_SET" != "true" ]; then
+            echo "::error::Required secret GHA_CORE_PAT is not set (Settings → Secrets → Actions)"
             ERRORS=$((ERRORS+1))
           else
-            echo "  ✅ GHATOKEN"
+            echo "  ✅ GHA_CORE_PAT"
           fi
           if [ $ERRORS -gt 0 ]; then
             echo "::error::$ERRORS required variable(s) missing — fix before running the pipeline"
