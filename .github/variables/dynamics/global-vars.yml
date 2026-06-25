@@ -26,7 +26,9 @@ protected_keys:
   - JFROG_URL                 # Org-wide Artifactory base URL — set once at Core layer
   - JFROG_REPO_SOLUTIONS      # Artifactory repo for solution ZIPs — org-wide
   - JFROG_REPO_SARIF          # Artifactory repo for checker SARIF reports — org-wide
-  - BASE_SOLUTIONS            # Comma-separated base solution names — org-wide
+  - BASE_SOLUTIONS                        # Comma-separated base solution names — org-wide
+  - SOLUTION_IMPORT_MAX_WAIT_MINUTES      # Import timeout cap — org-wide safety limit
+  - SOLUTION_CHECKER_TIMEOUT_MINUTES      # Checker timeout cap — org-wide safety limit
 
 # ── Global default values ─────────────────────────────────────────────────────
 variables:
@@ -46,6 +48,6 @@ variables:
   # before deploying project solutions. Leave empty to skip base-solution checks.
   BASE_SOLUTIONS: ""
 
-  # Pipeline behaviour — projects CAN override these (not in protected_keys)
+  # Pipeline timeouts (protected: org-wide caps, projects cannot override)
   SOLUTION_IMPORT_MAX_WAIT_MINUTES: "60"
   SOLUTION_CHECKER_TIMEOUT_MINUTES: "10"

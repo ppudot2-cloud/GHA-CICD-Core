@@ -189,7 +189,8 @@ jobs:
           PROTECTED_KEYS = {
             'PP_CHECKER_GEO', 'PP_CHECKER_ERROR_LEVEL',
             'JFROG_URL', 'JFROG_REPO_SOLUTIONS', 'JFROG_REPO_SARIF',
-            'BASE_SOLUTIONS'
+            'BASE_SOLUTIONS',
+            'SOLUTION_IMPORT_MAX_WAIT_MINUTES', 'SOLUTION_CHECKER_TIMEOUT_MINUTES'
           }
 
           errors   = []
