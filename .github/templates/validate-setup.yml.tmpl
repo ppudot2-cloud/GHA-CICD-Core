@@ -82,14 +82,8 @@ jobs:
           AZURE_TENANT_ID:       ${{ vars.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           AZURE_KEY_VAULT_NAME:  ${{ vars.AZURE_KEY_VAULT_NAME }}
-          PP_DEV_URL:            ${{ vars.PP_DEV_URL }}
-          PP_INTG_URL:           ${{ vars.PP_INTG_URL }}
-          PP_UAT_URL:            ${{ vars.PP_UAT_URL }}
-          PP_FRS_URL:            ${{ vars.PP_FRS_URL }}
-          PP_PERF_URL:           ${{ vars.PP_PERF_URL }}
-          PP_PROD_URL:           ${{ vars.PP_PROD_URL }}
           PP_SDBX_URL:           ${{ vars.PP_SDBX_URL }}
-          GHA_CORE_PAT_SET:          ${{ secrets.GHA_CORE_PAT != '' }}
+          GHA_CORE_PAT_SET:      ${{ secrets.GHA_CORE_PAT != '' }}
         run: |
           ERRORS=0
           check_var() {
@@ -105,14 +99,10 @@ jobs:
           check_var AZURE_TENANT_ID
           check_var AZURE_SUBSCRIPTION_ID
           check_var AZURE_KEY_VAULT_NAME
-          echo "── Power Platform URLs ──────────────────────────────────────"
-          check_var PP_DEV_URL
-          check_var PP_INTG_URL
-          check_var PP_UAT_URL
-          check_var PP_FRS_URL
-          check_var PP_PERF_URL
-          check_var PP_PROD_URL
+          echo "── Sandbox URL (used by export-solution.yml) ────────────────"
           check_var PP_SDBX_URL
+          echo "  ℹ️  Deployment URLs (Dev→Prod) are in project-vars.yml environments:"
+          echo "  ℹ️  block — no PP_*_URL GitHub Variables needed for them."
           echo "── Secrets ──────────────────────────────────────────────────"
           if [ "$GHA_CORE_PAT_SET" != "true" ]; then
             echo "::error::Required secret GHA_CORE_PAT is not set (Settings → Secrets → Actions)"
@@ -125,6 +115,28 @@ jobs:
             exit 1
           fi
           echo "✅ All required variables and secrets are set"
+
+      - name: Validate environments block in project-vars.yml
+        shell: bash
+        run: |
+          PROJ_VARS=".github/config/project-vars.yml"
+          if [ ! -f "$PROJ_VARS" ]; then
+            echo "::error::$PROJ_VARS not found — run onboard-project to scaffold the repo"
+            exit 1
+          fi
+          if ! grep -q "^environments:" "$PROJ_VARS"; then
+            echo "::error::$PROJ_VARS is missing an 'environments:' block"
+            echo "::error::Add the block — see project-vars.yml comments for syntax"
+            exit 1
+          fi
+          ENV_COUNT=$(awk '/^environments:/,/^[a-z]/' "$PROJ_VARS" | grep -c '^\s*url:' || true)
+          if [ "$ENV_COUNT" -eq 0 ]; then
+            echo "::error::environments: block in $PROJ_VARS has no entries with a 'url:' field"
+            exit 1
+          fi
+          echo "✅ environments: block found — $ENV_COUNT environment(s) configured"
+          awk '/^environments:/,/^[a-z]/' "$PROJ_VARS" | \
+            grep -E '^\s+(- name|url):' | sed 's/.*- name: /  🌐 /;s/.*url: /     → /' || true
 
   # ============================================================================
   # Layer 2 — OIDC + Key Vault validation per environment

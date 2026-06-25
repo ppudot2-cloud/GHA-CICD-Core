@@ -79,6 +79,20 @@ jobs:
       jfrog_url:        ${{ steps.core-vars.outputs.jfrog_url }}
       jfrog_repo:       ${{ steps.core-vars.outputs.jfrog_repo }}
       base_solutions:   ${{ steps.core-vars.outputs.base_solutions }}
+      dev_config:       ${{ steps.env-config.outputs.dev_config }}
+      intg_config:      ${{ steps.env-config.outputs.intg_config }}
+      uat_config:       ${{ steps.env-config.outputs.uat_config }}
+      frs_config:       ${{ steps.env-config.outputs.frs_config }}
+      perf_config:      ${{ steps.env-config.outputs.perf_config }}
+      prod_config:      ${{ steps.env-config.outputs.prod_config }}
+      pre_prod_envs:    ${{ steps.env-config.outputs.pre_prod_envs }}
+      pp_sdbx_url:      ${{ steps.env-config.outputs.pp_sdbx_url }}
+      pp_dev_url:       ${{ steps.env-config.outputs.pp_dev_url }}
+      pp_intg_url:      ${{ steps.env-config.outputs.pp_intg_url }}
+      pp_uat_url:       ${{ steps.env-config.outputs.pp_uat_url }}
+      pp_frs_url:       ${{ steps.env-config.outputs.pp_frs_url }}
+      pp_perf_url:      ${{ steps.env-config.outputs.pp_perf_url }}
+      pp_prod_url:      ${{ steps.env-config.outputs.pp_prod_url }}
 
     steps:
       - name: Checkout repository
@@ -130,6 +144,71 @@ jobs:
             Write-Host "  $k = $($r[$k])"
           }
 
+      - name: Install PyYAML
+        run: pip install pyyaml --quiet
+
+      - name: Read environment config
+        id: env-config
+        env:
+          ENABLE_ROLLBACK: ${{ vars.ENABLE_ROLLBACK }}
+        shell: python
+        run: |
+          import yaml, json, os, sys
+
+          config_path = '.github/config/project-vars.yml'
+          if not os.path.isfile(config_path):
+              print(f'::error::{config_path} not found — cannot resolve environment config')
+              sys.exit(1)
+
+          with open(config_path) as f:
+              pv = yaml.safe_load(f) or {}
+
+          envs = pv.get('environments', [])
+          if not envs:
+              print(f'::error::No "environments:" block found in {config_path}')
+              print('::error::Add an environments block — see project-vars.yml comments for syntax')
+              sys.exit(1)
+
+          rollback_enabled = os.environ.get('ENABLE_ROLLBACK', '').lower() == 'true'
+          variables        = pv.get('variables', {}) or {}
+          pp_sdbx_url      = variables.get('PP_SDBX_URL', '')
+
+          pre_prod_names = []
+          prev_url       = ''
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              for env in envs:
+                  name    = env['name']
+                  url     = env.get('url', '')
+                  is_prod = env.get('is_prod', False)
+
+                  cfg = {
+                      'name':                   name,
+                      'url':                    url,
+                      'solution_type':          'Unmanaged' if name.lower() == 'dev' else 'Managed',
+                      'enable_backup':          str(rollback_enabled).lower(),
+                      'enable_blocking_check':  str(env.get('enable_blocking_check', True)).lower(),
+                      'enable_version_compare': str(env.get('enable_version_compare', True)).lower(),
+                      'import_config_data':     str(env.get('import_config_data', False)).lower(),
+                      'previous_url':           prev_url,
+                  }
+                  key = name.lower()
+                  out.write(f'{key}_config={json.dumps(cfg, separators=(",", ":"))}\n')
+                  out.write(f'pp_{key}_url={url}\n')
+
+                  if not is_prod:
+                      pre_prod_names.append(name)
+
+                  prev_url = url
+
+              out.write(f'pre_prod_envs={",".join(pre_prod_names)}\n')
+              out.write(f'pp_sdbx_url={pp_sdbx_url}\n')
+
+          print(f'✅ Environment config — {len(envs)} environment(s), Pipeline 1: {",".join(pre_prod_names)}')
+          for env in envs:
+              tag = ' [prod — Pipeline 2]' if env.get('is_prod') else ''
+              print(f'   {env["name"]}{tag}: {env.get("url", "(no url)")}')
+
   # ============================================================================
   # Stage 2 — Export
   # ============================================================================
@@ -145,7 +224,7 @@ jobs:
     with:
       matrix:                 ${{ needs.setup.outputs.matrix }}
       solution_list:          ${{ needs.setup.outputs.solution_list }}
-      source_environment_url: ${{ vars.PP_SDBX_URL || 'https://mock.crm.dynamics.com' }}
+      source_environment_url: ${{ needs.setup.outputs.pp_sdbx_url || 'https://mock.crm.dynamics.com' }}
       mock_deploy:            ${{ inputs.mock_deploy == true }}
       skip_export:            ${{ inputs.skip_export == true || github.event_name == 'push' }}
       azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
@@ -167,7 +246,7 @@ jobs:
     with:
       matrix:                 ${{ needs.setup.outputs.matrix }}
       use_exported_source:    ${{ inputs.mock_deploy != true && inputs.skip_export != true && github.event_name != 'push' }}
-      source_environment_url: ${{ vars.PP_SDBX_URL || '' }}
+      source_environment_url: ${{ needs.setup.outputs.pp_sdbx_url }}
       mock_deploy:            ${{ inputs.mock_deploy == true }}
       jfrog_url:              ${{ needs.setup.outputs.jfrog_url }}
       jfrog_repo:             ${{ needs.setup.outputs.jfrog_repo }}
@@ -175,13 +254,13 @@ jobs:
       base_solutions:         ${{ needs.setup.outputs.base_solutions }}
       solution_count:         ${{ needs.setup.outputs.solution_count }}
       solution_list:          ${{ needs.setup.outputs.solution_list }}
-      pp_sdbx_url:            ${{ vars.PP_SDBX_URL || '' }}
-      pp_dev_url:             ${{ vars.PP_DEV_URL || '' }}
-      pp_intg_url:            ${{ vars.PP_INTG_URL || '' }}
-      pp_uat_url:             ${{ vars.PP_UAT_URL || '' }}
-      pp_frs_url:             ${{ vars.PP_FRS_URL || '' }}
-      pp_perf_url:            ${{ vars.PP_PERF_URL || '' }}
-      pp_prod_url:            ${{ vars.PP_PROD_URL || '' }}
+      pp_sdbx_url:            ${{ needs.setup.outputs.pp_sdbx_url }}
+      pp_dev_url:             ${{ needs.setup.outputs.pp_dev_url }}
+      pp_intg_url:            ${{ needs.setup.outputs.pp_intg_url }}
+      pp_uat_url:             ${{ needs.setup.outputs.pp_uat_url }}
+      pp_frs_url:             ${{ needs.setup.outputs.pp_frs_url }}
+      pp_perf_url:            ${{ needs.setup.outputs.pp_perf_url }}
+      pp_prod_url:            ${{ needs.setup.outputs.pp_prod_url }}
       gha_core_pat_set:       ${{ needs.setup.outputs.gha_core_pat_set == 'true' }}
       azure_client_id:        ${{ vars.AZURE_CLIENT_ID }}
       azure_tenant_id:        ${{ vars.AZURE_TENANT_ID }}
@@ -203,7 +282,7 @@ jobs:
       pull-requests: write
     uses: ppudot2-cloud/GHA-CICD-Core/.github/workflows/_stage-deploy-chain.yml@{{GHA_CORE_REF}}
     with:
-      environments:          'Dev,Intg,UAT,FRS,Perf'
+      environments:          ${{ needs.setup.outputs.pre_prod_envs }}
       matrix:                ${{ needs.setup.outputs.matrix }}
       mock_deploy:           ${{ inputs.mock_deploy == true }}
       solution_list:         ${{ needs.setup.outputs.solution_list }}
@@ -218,16 +297,11 @@ jobs:
       azure_tenant_id:       ${{ vars.AZURE_TENANT_ID }}
       azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       azure_key_vault_name:  ${{ vars.AZURE_KEY_VAULT_NAME }}
-      dev_config: >-
-        {"name":"Dev","url":"${{ vars.PP_DEV_URL }}","solution_type":"Unmanaged","enable_backup":"${{ vars.ENABLE_ROLLBACK == 'true' }}","enable_blocking_check":"false","enable_version_compare":"false","import_config_data":"false","previous_url":""}
-      intg_config: >-
-        {"name":"Intg","url":"${{ vars.PP_INTG_URL }}","solution_type":"Managed","enable_backup":"${{ vars.ENABLE_ROLLBACK == 'true' }}","enable_blocking_check":"true","enable_version_compare":"true","import_config_data":"false","previous_url":"${{ vars.PP_DEV_URL }}"}
-      uat_config: >-
-        {"name":"UAT","url":"${{ vars.PP_UAT_URL }}","solution_type":"Managed","enable_backup":"${{ vars.ENABLE_ROLLBACK == 'true' }}","enable_blocking_check":"true","enable_version_compare":"true","import_config_data":"false","previous_url":"${{ vars.PP_INTG_URL }}"}
-      frs_config: >-
-        {"name":"FRS","url":"${{ vars.PP_FRS_URL }}","solution_type":"Managed","enable_backup":"${{ vars.ENABLE_ROLLBACK == 'true' }}","enable_blocking_check":"true","enable_version_compare":"true","import_config_data":"false","previous_url":"${{ vars.PP_UAT_URL }}"}
-      perf_config: >-
-        {"name":"Perf","url":"${{ vars.PP_PERF_URL }}","solution_type":"Managed","enable_backup":"${{ vars.ENABLE_ROLLBACK == 'true' }}","enable_blocking_check":"true","enable_version_compare":"true","import_config_data":"false","previous_url":"${{ vars.PP_FRS_URL }}"}
+      dev_config:            ${{ needs.setup.outputs.dev_config }}
+      intg_config:           ${{ needs.setup.outputs.intg_config }}
+      uat_config:            ${{ needs.setup.outputs.uat_config }}
+      frs_config:            ${{ needs.setup.outputs.frs_config }}
+      perf_config:           ${{ needs.setup.outputs.perf_config }}
       feature_branch:    ${{ needs.stage-export.outputs.feature_branch }}
       pr_base_branch:    'main'
       pr_repository:     ${{ github.repository }}

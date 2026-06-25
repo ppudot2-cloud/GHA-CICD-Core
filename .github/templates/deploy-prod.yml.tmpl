@@ -81,6 +81,12 @@ jobs:
       matrix:        ${{ steps.ctx.outputs.matrix }}
       solution_list: ${{ steps.ctx.outputs.solution_list }}
       mock_deploy:   ${{ steps.ctx.outputs.mock_deploy }}
+      pp_uat_url:    ${{ steps.env-config.outputs.pp_uat_url }}
+      pp_intg_url:   ${{ steps.env-config.outputs.pp_intg_url }}
+      pp_perf_url:   ${{ steps.env-config.outputs.pp_perf_url }}
+      pp_prod_url:   ${{ steps.env-config.outputs.pp_prod_url }}
+      uat_config:    ${{ steps.env-config.outputs.uat_config }}
+      prod_config:   ${{ steps.env-config.outputs.prod_config }}
 
     steps:
       - name: Checkout main (merge commit)
@@ -116,6 +122,48 @@ jobs:
           "matrix=$($ctx.matrix)"              | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "solution_list=$($ctx.solutionList)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "mock_deploy=$mockDeploy"            | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Install PyYAML
+        run: pip install pyyaml --quiet
+
+      - name: Read environment URLs from project-vars.yml
+        id: env-config
+        env:
+          ENABLE_ROLLBACK: ${{ vars.ENABLE_ROLLBACK }}
+        shell: python
+        run: |
+          import yaml, json, os
+
+          config_path = '.github/config/project-vars.yml'
+          pv = {}
+          if os.path.isfile(config_path):
+              with open(config_path) as f:
+                  pv = yaml.safe_load(f) or {}
+
+          rollback_enabled = os.environ.get('ENABLE_ROLLBACK', '').lower() == 'true'
+          prev_url         = ''
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              for env in pv.get('environments', []):
+                  name    = env['name']
+                  url     = env.get('url', '')
+                  is_prod = env.get('is_prod', False)
+
+                  cfg = {
+                      'name':                   name,
+                      'url':                    url,
+                      'solution_type':          'Unmanaged' if name.lower() == 'dev' else 'Managed',
+                      'enable_backup':          str(rollback_enabled).lower(),
+                      'enable_blocking_check':  str(env.get('enable_blocking_check', True)).lower(),
+                      'enable_version_compare': str(env.get('enable_version_compare', True)).lower(),
+                      'import_config_data':     str(env.get('import_config_data', False)).lower(),
+                      'previous_url':           prev_url,
+                  }
+                  key = name.lower()
+                  out.write(f'pp_{key}_url={url}\n')
+                  out.write(f'{key}_config={json.dumps(cfg, separators=(",", ":"))}\n')
+                  print(f'  {"[prod] " if is_prod else ""}{name}: {url}')
+                  prev_url = url
 
   deploy-uat:
     name: "🚀 Deploy | UAT"
@@ -171,14 +219,14 @@ jobs:
         uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@{{GHA_CORE_REF}}
         with:
           solutions_json:           ${{ needs.read-context.outputs.matrix }}
-          environment_name:         UAT
-          environment_url:          ${{ vars.PP_UAT_URL }}
-          solution_type:            Managed
-          enable_backup:            ${{ vars.ENABLE_ROLLBACK == 'true' }}
-          enable_blocking_check:    true
-          enable_version_compare:   true
-          import_config_data:       false
-          previous_environment_url: ${{ vars.PP_INTG_URL }}
+          environment_name:         ${{ fromJson(needs.read-context.outputs.uat_config).name }}
+          environment_url:          ${{ needs.read-context.outputs.pp_uat_url }}
+          solution_type:            ${{ fromJson(needs.read-context.outputs.uat_config).solution_type }}
+          enable_backup:            ${{ fromJson(needs.read-context.outputs.uat_config).enable_backup }}
+          enable_blocking_check:    ${{ fromJson(needs.read-context.outputs.uat_config).enable_blocking_check }}
+          enable_version_compare:   ${{ fromJson(needs.read-context.outputs.uat_config).enable_version_compare }}
+          import_config_data:       ${{ fromJson(needs.read-context.outputs.uat_config).import_config_data }}
+          previous_environment_url: ${{ needs.read-context.outputs.pp_intg_url }}
           tag_prod_deployed:        false
           activate_flows:           true
           mock_deploy:              ${{ (inputs.mock_deploy == true || needs.read-context.outputs.mock_deploy == 'true') && 'true' || 'false' }}
@@ -245,14 +293,14 @@ jobs:
         uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/deploy-all-solutions@{{GHA_CORE_REF}}
         with:
           solutions_json:           ${{ needs.read-context.outputs.matrix }}
-          environment_name:         Prod
-          environment_url:          ${{ vars.PP_PROD_URL }}
-          solution_type:            Managed
-          enable_backup:            ${{ vars.ENABLE_ROLLBACK == 'true' }}
-          enable_blocking_check:    true
-          enable_version_compare:   true
-          import_config_data:       true
-          previous_environment_url: ${{ vars.PP_PERF_URL }}
+          environment_name:         ${{ fromJson(needs.read-context.outputs.prod_config).name }}
+          environment_url:          ${{ needs.read-context.outputs.pp_prod_url }}
+          solution_type:            ${{ fromJson(needs.read-context.outputs.prod_config).solution_type }}
+          enable_backup:            ${{ fromJson(needs.read-context.outputs.prod_config).enable_backup }}
+          enable_blocking_check:    ${{ fromJson(needs.read-context.outputs.prod_config).enable_blocking_check }}
+          enable_version_compare:   ${{ fromJson(needs.read-context.outputs.prod_config).enable_version_compare }}
+          import_config_data:       ${{ fromJson(needs.read-context.outputs.prod_config).import_config_data }}
+          previous_environment_url: ${{ needs.read-context.outputs.pp_perf_url }}
           tag_prod_deployed:        true
           activate_flows:           true
           mock_deploy:              ${{ (inputs.mock_deploy == true || needs.read-context.outputs.mock_deploy == 'true') && 'true' || 'false' }}

@@ -308,6 +308,37 @@ jobs:
           else:
               warnings.append(f'{PROJ_VARS_FILE} not found — using global defaults from GHA-CICD-Core')
 
+          # Validate environments block (required since Option 2 migration)
+          if proj:
+              envs = proj.get('environments', [])
+              if not envs:
+                  errors.append(
+                      f'{PROJ_VARS_FILE}: missing "environments:" block — '
+                      f'add one to configure deployment targets (see project-vars.yml comments)'
+                  )
+              else:
+                  env_names_seen = set()
+                  for i, env in enumerate(envs):
+                      env_name = env.get('name', f'<env[{i}]>')
+                      if env_name in env_names_seen:
+                          errors.append(f'{PROJ_VARS_FILE}: duplicate environment name "{env_name}"')
+                      env_names_seen.add(env_name)
+
+                      if not env.get('url'):
+                          errors.append(
+                              f'{PROJ_VARS_FILE}: environments[{i}] ({env_name}) is missing "url"'
+                          )
+                      elif not env.get('url', '').startswith('https://'):
+                          warnings.append(
+                              f'{PROJ_VARS_FILE}: [{env_name}] url "{env.get("url")}" does not start with https://'
+                          )
+
+                      if 'solution_type' in env:
+                          errors.append(
+                              f'{PROJ_VARS_FILE}: [{env_name}] "solution_type" must not be set here — '
+                              f'it is enforced by the pipeline (Dev=Unmanaged, all others=Managed)'
+                          )
+
           for w in warnings:
               print(f'::warning::{w}')
 
