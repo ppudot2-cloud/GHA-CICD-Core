@@ -76,8 +76,14 @@ def section(title):
 
 
 # ── Repo root ────────────────────────────────────────────────────────────────
+# When invoked as `python3 .ci/.github/scripts/dynamics/simulate-pipeline.py`
+# from a project repo (GHA-Dynamics), CWD is the project root and contains
+# src/solutions/ or solutions.json. Use CWD in that case; fall back to
+# SCRIPT_DIR.parent for old-style invocations where the script lived in
+# <project>/scripts/.
 SCRIPT_DIR  = Path(__file__).resolve().parent
-REPO_ROOT   = SCRIPT_DIR.parent
+_cwd = Path.cwd()
+REPO_ROOT   = _cwd if (_cwd / "src" / "solutions").is_dir() or (_cwd / "solutions.json").is_file() else SCRIPT_DIR.parent
 SOLUTIONS_DIR   = REPO_ROOT / "src" / "solutions"
 CONFIG_FILE     = REPO_ROOT / ".github" / "solutions-config.json"
 DEPLOY_SETTINGS = REPO_ROOT / "deployment-settings"
@@ -199,9 +205,13 @@ def build_one_solution(solution, args, run_number):
 
     # ── Version stamp ────────────────────────────────────────────────────────
     section("Stamp version")
+    # Support both packed solutions (Solution.xml at root) and unpacked solutions
+    # (Solution.xml inside Other/ subdirectory, as produced by pac solution unpack)
     solution_xml = sol_dir / "Solution.xml"
     if not solution_xml.is_file():
-        fail(f"Solution.xml not found at {solution_xml}")
+        solution_xml = sol_dir / "Other" / "Solution.xml"
+    if not solution_xml.is_file():
+        fail(f"Solution.xml not found at {sol_dir}/Solution.xml or {sol_dir}/Other/Solution.xml")
 
     tree = ET.parse(solution_xml)
     root = tree.getroot()
