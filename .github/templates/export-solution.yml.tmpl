@@ -67,10 +67,14 @@ jobs:
     name: "🔍 Resolve Solutions & Branch"
     runs-on: ubuntu-latest
     outputs:
-      matrix:          ${{ steps.resolve.outputs.matrix }}
-      solution_list:   ${{ steps.resolve.outputs.solution_list }}
-      solution_count:  ${{ steps.resolve.outputs.solution_count }}
-      branch_name:     ${{ steps.set-branch.outputs.branch_name }}
+      matrix:                ${{ steps.resolve.outputs.matrix }}
+      solution_list:         ${{ steps.resolve.outputs.solution_list }}
+      solution_count:        ${{ steps.resolve.outputs.solution_count }}
+      branch_name:           ${{ steps.set-branch.outputs.branch_name }}
+      azure_client_id:       ${{ steps.azure-config.outputs.azure_client_id }}
+      azure_tenant_id:       ${{ steps.azure-config.outputs.azure_tenant_id }}
+      azure_subscription_id: ${{ steps.azure-config.outputs.azure_subscription_id }}
+      azure_key_vault_name:  ${{ steps.azure-config.outputs.azure_key_vault_name }}
 
     steps:
       - name: Checkout repository
@@ -106,6 +110,26 @@ jobs:
           "branch_name=$branch" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Branch: $branch"
 
+      - name: Install PyYAML
+        run: pip install pyyaml --quiet
+
+      - name: Read Azure identity from project-vars.yml
+        id: azure-config
+        shell: python
+        run: |
+          import yaml, os
+          config_path = '.github/config/project-vars.yml'
+          variables = {}
+          if os.path.isfile(config_path):
+              with open(config_path) as f:
+                  pv = yaml.safe_load(f) or {}
+              variables = pv.get('variables', {}) or {}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'azure_client_id={variables.get("AZURE_CLIENT_ID", "")}\n')
+              out.write(f'azure_tenant_id={variables.get("AZURE_TENANT_ID", "")}\n')
+              out.write(f'azure_subscription_id={variables.get("AZURE_SUBSCRIPTION_ID", "")}\n')
+              out.write(f'azure_key_vault_name={variables.get("AZURE_KEY_VAULT_NAME", "")}\n')
+
   export:
     name: "📤 Export | ${{ matrix.solution }}"
     needs: setup
@@ -134,10 +158,10 @@ jobs:
         if: inputs.mock_deploy != true
         uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/reveille@{{GHA_CORE_REF}}
         with:
-          azure_client_id:       ${{ vars.AZURE_CLIENT_ID }}
-          azure_tenant_id:       ${{ vars.AZURE_TENANT_ID }}
-          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          azure_key_vault_name:  ${{ vars.AZURE_KEY_VAULT_NAME }}
+          azure_client_id:       ${{ needs.setup.outputs.azure_client_id }}
+          azure_tenant_id:       ${{ needs.setup.outputs.azure_tenant_id }}
+          azure_subscription_id: ${{ needs.setup.outputs.azure_subscription_id }}
+          azure_key_vault_name:  ${{ needs.setup.outputs.azure_key_vault_name }}
 
       - name: Install PAC CLI
         uses: microsoft/powerplatform-actions/actions-install@v1

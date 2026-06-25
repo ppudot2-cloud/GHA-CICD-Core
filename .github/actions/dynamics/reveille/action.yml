@@ -40,22 +40,22 @@ inputs:
     required: false
     default: 'false'
   azure_client_id:
-    description: 'Azure service principal client ID (vars.AZURE_CLIENT_ID from the caller)'
+    description: 'Azure service principal client ID — read from project-vars.yml variables.AZURE_CLIENT_ID'
     required: false
     default: ''
   azure_tenant_id:
-    description: 'Azure tenant ID (vars.AZURE_TENANT_ID from the caller)'
+    description: 'Azure tenant ID — read from project-vars.yml variables.AZURE_TENANT_ID'
     required: false
     default: ''
   azure_subscription_id:
-    description: 'Azure subscription ID (vars.AZURE_SUBSCRIPTION_ID from the caller)'
+    description: 'Azure subscription ID — read from project-vars.yml variables.AZURE_SUBSCRIPTION_ID'
     required: false
     default: ''
   azure_key_vault_name:
     description: >
-      Azure Key Vault name (vars.AZURE_KEY_VAULT_NAME from the caller).
-      Set this as a GitHub Environment-level variable to use a different KV per environment
-      (e.g. non-prod KV for Dev/Intg/UAT/FRS/Perf, prod KV for Prod).
+      Azure Key Vault name — read from project-vars.yml (per-environment key_vault_name field,
+      falling back to variables.AZURE_KEY_VAULT_NAME). Set a different key_vault_name per
+      environment to use separate KVs for non-prod and prod.
       One service principal per KV boundary is the recommended pattern.
     required: false
     default: ''

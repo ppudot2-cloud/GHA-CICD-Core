@@ -59,22 +59,22 @@ on:
         default: false
 
       azure_client_id:
-        description: 'Azure service principal client ID — passed from the caller repo (vars.AZURE_CLIENT_ID)'
+        description: 'Azure service principal client ID — passed from the caller repo via project-vars.yml'
         required: false
         type: string
         default: ''
       azure_tenant_id:
-        description: 'Azure tenant ID — passed from the caller repo (vars.AZURE_TENANT_ID)'
+        description: 'Azure tenant ID — passed from the caller repo via project-vars.yml'
         required: false
         type: string
         default: ''
       azure_subscription_id:
-        description: 'Azure subscription ID — passed from the caller repo (vars.AZURE_SUBSCRIPTION_ID)'
+        description: 'Azure subscription ID — passed from the caller repo via project-vars.yml'
         required: false
         type: string
         default: ''
       azure_key_vault_name:
-        description: 'Azure Key Vault name — passed from the caller repo (vars.AZURE_KEY_VAULT_NAME)'
+        description: 'Azure Key Vault name — passed from the caller repo via project-vars.yml'
         required: false
         type: string
         default: ''

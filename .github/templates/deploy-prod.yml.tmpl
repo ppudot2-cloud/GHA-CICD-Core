@@ -81,12 +81,15 @@ jobs:
       matrix:        ${{ steps.ctx.outputs.matrix }}
       solution_list: ${{ steps.ctx.outputs.solution_list }}
       mock_deploy:   ${{ steps.ctx.outputs.mock_deploy }}
-      pp_uat_url:    ${{ steps.env-config.outputs.pp_uat_url }}
-      pp_intg_url:   ${{ steps.env-config.outputs.pp_intg_url }}
-      pp_perf_url:   ${{ steps.env-config.outputs.pp_perf_url }}
-      pp_prod_url:   ${{ steps.env-config.outputs.pp_prod_url }}
-      uat_config:    ${{ steps.env-config.outputs.uat_config }}
-      prod_config:   ${{ steps.env-config.outputs.prod_config }}
+      pp_uat_url:            ${{ steps.env-config.outputs.pp_uat_url }}
+      pp_intg_url:           ${{ steps.env-config.outputs.pp_intg_url }}
+      pp_perf_url:           ${{ steps.env-config.outputs.pp_perf_url }}
+      pp_prod_url:           ${{ steps.env-config.outputs.pp_prod_url }}
+      uat_config:            ${{ steps.env-config.outputs.uat_config }}
+      prod_config:           ${{ steps.env-config.outputs.prod_config }}
+      azure_client_id:       ${{ steps.env-config.outputs.azure_client_id }}
+      azure_tenant_id:       ${{ steps.env-config.outputs.azure_tenant_id }}
+      azure_subscription_id: ${{ steps.env-config.outputs.azure_subscription_id }}
 
     steps:
       - name: Checkout main (merge commit)
@@ -140,8 +143,13 @@ jobs:
               with open(config_path) as f:
                   pv = yaml.safe_load(f) or {}
 
-          rollback_enabled = os.environ.get('ENABLE_ROLLBACK', '').lower() == 'true'
-          prev_url         = ''
+          rollback_enabled  = os.environ.get('ENABLE_ROLLBACK', '').lower() == 'true'
+          variables         = pv.get('variables', {}) or {}
+          azure_client_id   = variables.get('AZURE_CLIENT_ID', '')
+          azure_tenant_id   = variables.get('AZURE_TENANT_ID', '')
+          azure_sub_id      = variables.get('AZURE_SUBSCRIPTION_ID', '')
+          azure_kv_default  = variables.get('AZURE_KEY_VAULT_NAME', '')
+          prev_url          = ''
 
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               for env in pv.get('environments', []):
@@ -158,12 +166,17 @@ jobs:
                       'enable_version_compare': str(env.get('enable_version_compare', True)).lower(),
                       'import_config_data':     str(env.get('import_config_data', False)).lower(),
                       'previous_url':           prev_url,
+                      'key_vault_name':         env.get('key_vault_name') or azure_kv_default,
                   }
                   key = name.lower()
                   out.write(f'pp_{key}_url={url}\n')
                   out.write(f'{key}_config={json.dumps(cfg, separators=(",", ":"))}\n')
                   print(f'  {"[prod] " if is_prod else ""}{name}: {url}')
                   prev_url = url
+
+              out.write(f'azure_client_id={azure_client_id}\n')
+              out.write(f'azure_tenant_id={azure_tenant_id}\n')
+              out.write(f'azure_subscription_id={azure_sub_id}\n')
 
   deploy-uat:
     name: "🚀 Deploy | UAT"
@@ -185,10 +198,10 @@ jobs:
           jfrog_enabled:         ${{ vars.JFROG_URL != '' }}
           mulesoft_enabled:      ${{ vars.MULESOFT_ENABLED == 'true' }}
           servicenow_enabled:    ${{ vars.SERVICENOW_ENABLED == 'true' }}
-          azure_client_id:       ${{ vars.AZURE_CLIENT_ID }}
-          azure_tenant_id:       ${{ vars.AZURE_TENANT_ID }}
-          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          azure_key_vault_name:  ${{ vars.AZURE_KEY_VAULT_NAME }}
+          azure_client_id:       ${{ needs.read-context.outputs.azure_client_id }}
+          azure_tenant_id:       ${{ needs.read-context.outputs.azure_tenant_id }}
+          azure_subscription_id: ${{ needs.read-context.outputs.azure_subscription_id }}
+          azure_key_vault_name:  ${{ fromJson(needs.read-context.outputs.uat_config).key_vault_name }}
       - name: Install PAC CLI
         uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@{{GHA_CORE_REF}}
       - name: Download solution artifacts
@@ -259,10 +272,10 @@ jobs:
           jfrog_enabled:         ${{ vars.JFROG_URL != '' }}
           mulesoft_enabled:      ${{ vars.MULESOFT_ENABLED == 'true' }}
           servicenow_enabled:    ${{ vars.SERVICENOW_ENABLED == 'true' }}
-          azure_client_id:       ${{ vars.AZURE_CLIENT_ID }}
-          azure_tenant_id:       ${{ vars.AZURE_TENANT_ID }}
-          azure_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          azure_key_vault_name:  ${{ vars.AZURE_KEY_VAULT_NAME }}
+          azure_client_id:       ${{ needs.read-context.outputs.azure_client_id }}
+          azure_tenant_id:       ${{ needs.read-context.outputs.azure_tenant_id }}
+          azure_subscription_id: ${{ needs.read-context.outputs.azure_subscription_id }}
+          azure_key_vault_name:  ${{ fromJson(needs.read-context.outputs.prod_config).key_vault_name }}
       - name: Install PAC CLI
         uses: ppudot2-cloud/GHA-CICD-Core/.github/actions/dynamics/pac-install@{{GHA_CORE_REF}}
       - name: Download solution artifacts
