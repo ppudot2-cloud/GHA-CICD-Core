@@ -36,8 +36,12 @@
     GitHub Actions run attempt.
 
 .PARAMETER LocalPath
-    For upload: local folder containing the ZIPs to upload.
+    For upload: local folder containing the files to upload.
     For download: local destination folder.
+
+.PARAMETER FileFilter
+    For upload: file name filter passed to Get-ChildItem (default: *.zip).
+    Use *.sarif to upload Solution Checker reports.
 
 .PARAMETER TagProperties
     For tag action: semicolon-separated key=value pairs
@@ -56,6 +60,7 @@ param(
     [Parameter(Mandatory)][string] $RunNumber,
     [Parameter(Mandatory)][string] $RunAttempt,
     [string] $LocalPath      = '.',
+    [string] $FileFilter     = '*.zip',
     [string] $TagProperties  = '',
     [bool]   $MockDeploy     = $false
 )
@@ -74,9 +79,9 @@ switch ($Action) {
 
     # ── UPLOAD ────────────────────────────────────────────────────────────────
     'upload' {
-        $zips = Get-ChildItem -Path $LocalPath -Filter "*.zip" -File
+        $zips = Get-ChildItem -Path $LocalPath -Filter $FileFilter -File -Recurse
         if ($zips.Count -eq 0) {
-            Write-Host "::warning::No ZIP files found in $LocalPath — nothing to upload."
+            Write-Host "::warning::No files matching '$FileFilter' found in $LocalPath — nothing to upload."
             exit 0
         }
 

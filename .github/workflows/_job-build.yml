@@ -60,11 +60,16 @@ on:
         required: false
         type: string
         default: ''
-      jfrog_repo:
-        description: 'JFrog repository name'
+      jfrog_repo_solutions:
+        description: 'JFrog repository for solution ZIPs'
         required: false
         type: string
-        default: 'power-platform'
+        default: 'powerplatform-solutions'
+      jfrog_repo_sarif:
+        description: 'JFrog repository for Solution Checker SARIF reports'
+        required: false
+        type: string
+        default: 'powerplatform-checker-reports'
       azure_client_id:
         description: 'Azure service principal client ID — passed from the caller repo via project-vars.yml'
         required: false
@@ -280,7 +285,8 @@ jobs:
           managed_zip:           ${{ steps.pack.outputs.managed_zip }}
           checker_artifact_name: ${{ steps.pack.outputs.checker_artifact_name }}
           jfrog_url:             ${{ inputs.jfrog_url }}
-          jfrog_repo:            ${{ inputs.jfrog_repo }}
+          jfrog_repo_solutions:  ${{ inputs.jfrog_repo_solutions }}
+          jfrog_repo_sarif:      ${{ inputs.jfrog_repo_sarif }}
           run_number:            ${{ github.run_number }}
           run_attempt:           ${{ github.run_attempt }}
           mock_deploy:           ${{ inputs.mock_deploy }}

@@ -261,7 +261,7 @@ jobs:
           mock_deploy:              'true'
           base_solutions:           ''
           jfrog_url:                ''
-          jfrog_repo:               'powerplatform-solutions'
+          jfrog_repo_solutions:     'powerplatform-solutions'
           run_number:               ${{ github.run_number }}
           run_attempt:              ${{ github.run_attempt }}
           enable_servicenow:        false

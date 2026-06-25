@@ -109,11 +109,11 @@ on:
         required: false
         type: string
         default: ''
-      jfrog_repo:
-        description: 'JFrog repository name'
+      jfrog_repo_solutions:
+        description: 'JFrog repository for solution ZIPs'
         required: false
         type: string
-        default: 'power-platform'
+        default: 'powerplatform-solutions'
       run_number:
         description: 'GitHub run number (for deterministic artifact naming)'
         required: true
@@ -196,7 +196,7 @@ jobs:
           mock_deploy:              ${{ inputs.mock_deploy }}
           base_solutions:           ${{ inputs.base_solutions }}
           jfrog_url:                ${{ inputs.jfrog_url }}
-          jfrog_repo:               ${{ inputs.jfrog_repo }}
+          jfrog_repo:               ${{ inputs.jfrog_repo_solutions }}
           run_number:               ${{ inputs.run_number }}
           run_attempt:              ${{ inputs.run_attempt }}
           enable_servicenow:        ${{ inputs.enable_servicenow }}

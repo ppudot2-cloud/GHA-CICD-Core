@@ -47,8 +47,8 @@ inputs:
   jfrog_url:
     description: 'JFrog Artifactory base URL'
     required: true
-  jfrog_repo:
-    description: 'JFrog repository name'
+  jfrog_repo_solutions:
+    description: 'JFrog repository for solution ZIPs (used for prodDeployed tagging)'
     required: true
   run_number:
     description: 'GitHub run number'
@@ -91,7 +91,7 @@ runs:
           -SolutionName "${{ inputs.solution_name }}" `
           -ArtifactName "${{ inputs.artifact_name }}" `
           -JFrogUrl "${{ inputs.jfrog_url }}" `
-          -JFrogRepo "${{ inputs.jfrog_repo }}" `
+          -JFrogRepo "${{ inputs.jfrog_repo_solutions }}" `
           -RunNumber "${{ inputs.run_number }}" `
           -RunAttempt "${{ inputs.run_attempt }}" `
           -JFrogToken "${{ env.JFROG_TOKEN }}"

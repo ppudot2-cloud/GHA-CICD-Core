@@ -1,70 +1,51 @@
 # =============================================================================
 # GLOBAL PIPELINE VARIABLES — GHA-CICD-Core
 # =============================================================================
-# These variables apply to ALL projects that consume GHA-CICD-Core reusable workflows.
+# These variables apply to ALL projects that consume GHA-CICD-Core reusable
+# workflows.
 #
 # GOVERNANCE RULES:
-#   • protected_keys  : variables that project repos (GHA-Dynamics) CANNOT override.
-#                       Any key listed here is enforced by Merge-Variables.ps1.
-#   • variables       : default values used when no project-level override exists.
+#   • protected_keys  : keys that project-level project-vars.yml CANNOT override.
+#                       The setup merge step exits 1 with a clear error if a
+#                       project-vars.yml attempts to set one.
+#   • variables       : default values; project-vars.yml can override any key
+#                       that is NOT in protected_keys.
 #
 # HOW VARIABLES REACH THE PIPELINE:
-#   At the start of each reusable workflow, Merge-Variables.ps1 is executed.
-#   It reads this file (from the GHA-CICD-Core checkout) and the project's
-#   project-vars.yml, merges them (project adds/overrides non-protected keys),
-#   and writes the result to $GITHUB_ENV so all subsequent steps can use
-#   ${{ env.VAR_NAME }} syntax.
-#
-# PROJECT-LEVEL AZURE IDENTITY VALUES:
-#   Each project has its own App Registration, Key Vault, and potentially its
-#   own tenant. Set these as GitHub repository Variables on each project repo
-#   (Settings → Variables): AZURE_CLIENT_ID, AZURE_TENANT_ID,
-#   AZURE_SUBSCRIPTION_ID, AZURE_KEY_VAULT_NAME.
-#   They are NOT in this file — they are sourced from vars.* at workflow start
-#   and are intentionally NOT in protected_keys so each project can set them.
+#   The setup job in build-and-deploy.yml runs a single Python step that:
+#     1. Reads this file (.ci/.github/variables/dynamics/global-vars.yml)
+#     2. Reads the project's .github/config/project-vars.yml
+#     3. Merges them (project adds/overrides, protected_keys enforced)
+#     4. Emits all values as step outputs consumed by subsequent steps and stages
 # =============================================================================
 
 # ── Keys that project-level project-vars.yml CANNOT override ─────────────────
-# Add any key here that must be consistent across all projects.
 protected_keys:
-  # These keys enforce org-wide consistency — project repos cannot override them.
-  # Azure identity (AZURE_*) and GHA-CICD-Core location are intentionally NOT protected:
-  # each project has its own Key Vault, App Registration, and GHA-CICD-Core reference.
   - PP_CHECKER_GEO            # Solution Checker geography — org-wide consistency
   - PP_CHECKER_ERROR_LEVEL    # Minimum severity that fails the build — security gate
-  - DEFAULT_SOLUTION_TYPE     # All solutions must be managed in upper environments
-  - ENABLE_BACKUP             # Backups before deploy are mandatory — cannot be disabled
-  - ENABLE_ROLLBACK           # Per-environment rollback gate — set as GitHub Env var, not here
   - JFROG_URL                 # Org-wide Artifactory base URL — set once at Core layer
-  - JFROG_REPO                # Org-wide Artifactory repo name — consistent across all projects
-  - BASE_SOLUTIONS            # Comma-separated base solution names for version-compare — org-wide
+  - JFROG_REPO_SOLUTIONS      # Artifactory repo for solution ZIPs — org-wide
+  - JFROG_REPO_SARIF          # Artifactory repo for checker SARIF reports — org-wide
+  - BASE_SOLUTIONS            # Comma-separated base solution names — org-wide
 
 # ── Global default values ─────────────────────────────────────────────────────
 variables:
-  # Power Platform — Solution Checker settings (enforced, org-wide)
+  # Power Platform — Solution Checker (enforced, org-wide)
   PP_CHECKER_GEO:         "UnitedStates"
   PP_CHECKER_ERROR_LEVEL: "HighIssue"
 
-  # JFrog Artifactory — org-wide URL and repo (protected: projects cannot override)
-  # Set JFROG_URL to your organisation's Artifactory base URL, e.g.:
-  #   https://myorg.jfrog.io/artifactory
-  JFROG_URL:  ""
-  JFROG_REPO: "powerplatform-solutions"
+  # JFrog Artifactory — org-wide values (protected: projects cannot override)
+  # Set JFROG_URL to your organisation's Artifactory base URL.
+  # Solution ZIPs and SARIF reports are stored in separate repositories.
+  JFROG_URL:             ""
+  JFROG_REPO_SOLUTIONS:  "powerplatform-solutions"
+  JFROG_REPO_SARIF:      "powerplatform-checker-reports"
 
   # Base solutions for version-compare (protected: hardcoded at Core layer)
   # Comma-separated unique names of prerequisite solutions that must be present
-  # in each environment before deploying project solutions.
-  # Example: "nfBase,nfCustomizations,nfShared"
-  # Leave empty to skip base-solution checks.
+  # before deploying project solutions. Leave empty to skip base-solution checks.
   BASE_SOLUTIONS: ""
-
-  # Deploy defaults (enforced — prevents projects from disabling safety gates)
-  DEFAULT_SOLUTION_TYPE:  "managed"
-  ENABLE_BACKUP:          "true"
-  ENABLE_BLOCKING_CHECK:  "true"
-  MOCK_DEPLOY:            "false"
 
   # Pipeline behaviour — projects CAN override these (not in protected_keys)
   SOLUTION_IMPORT_MAX_WAIT_MINUTES: "60"
   SOLUTION_CHECKER_TIMEOUT_MINUTES: "10"
-  JFROG_UPLOAD_ENABLED: "true"

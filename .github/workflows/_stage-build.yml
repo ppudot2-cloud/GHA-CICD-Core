@@ -44,11 +44,16 @@ on:
         required: false
         type: string
         default: ''
-      jfrog_repo:
-        description: 'JFrog repository name'
+      jfrog_repo_solutions:
+        description: 'JFrog repository for solution ZIPs'
         required: false
         type: string
-        default: 'power-platform'
+        default: 'powerplatform-solutions'
+      jfrog_repo_sarif:
+        description: 'JFrog repository for Solution Checker SARIF reports'
+        required: false
+        type: string
+        default: 'powerplatform-checker-reports'
       use_exported_source:
         description: >
           When true, _job-build downloads the exported-source-<name> artifact uploaded
@@ -183,7 +188,8 @@ jobs:
           PROJ_VARS_FILE = '.github/config/project-vars.yml'
           PROTECTED_KEYS = {
             'PP_CHECKER_GEO', 'PP_CHECKER_ERROR_LEVEL',
-            'DEFAULT_SOLUTION_TYPE', 'ENABLE_BACKUP', 'ENABLE_ROLLBACK'
+            'JFROG_URL', 'JFROG_REPO_SOLUTIONS', 'JFROG_REPO_SARIF',
+            'BASE_SOLUTIONS'
           }
 
           errors   = []
@@ -448,7 +454,8 @@ jobs:
           $jfrogUrl = '${{ inputs.jfrog_url }}'
           if ($jfrogUrl) {
             Write-Host "  JFROG_URL            ✅  $jfrogUrl"
-            Write-Host ("  JFROG_REPO           {0}" -f '${{ inputs.jfrog_repo || 'power-platform' }}')
+            Write-Host ("  JFROG_REPO_SOLUTIONS {0}" -f '${{ inputs.jfrog_repo_solutions }}')
+            Write-Host ("  JFROG_REPO_SARIF     {0}" -f '${{ inputs.jfrog_repo_sarif }}')
           } else {
             Write-Host "  JFrog                ⚠️  Not configured (jfrog_url not set) — archival disabled"
           }
@@ -481,6 +488,8 @@ jobs:
           $md += "| GHA_CORE_PAT | $(if ($ghaCorePatSet) { '✅ Set' } else { '❌ **NOT SET**' }) |`n"
           if ($jfrogUrl) {
             $md += "`n### JFrog`n`n✅ Configured — ``$jfrogUrl```n"
+            $md += "- Solutions repo: ``${{ inputs.jfrog_repo_solutions }}```n"
+            $md += "- SARIF repo: ``${{ inputs.jfrog_repo_sarif }}```n"
           } else {
             $md += "`n### JFrog`n`n⚠️ Not configured — archival disabled`n"
           }
@@ -540,7 +549,8 @@ jobs:
       source_environment_url: ${{ inputs.source_environment_url }}
       mock_deploy:            ${{ inputs.mock_deploy }}
       jfrog_url:              ${{ inputs.jfrog_url }}
-      jfrog_repo:             ${{ inputs.jfrog_repo }}
+      jfrog_repo_solutions:   ${{ inputs.jfrog_repo_solutions }}
+      jfrog_repo_sarif:       ${{ inputs.jfrog_repo_sarif }}
       azure_client_id:        ${{ inputs.azure_client_id }}
       azure_tenant_id:        ${{ inputs.azure_tenant_id }}
       azure_subscription_id:  ${{ inputs.azure_subscription_id }}

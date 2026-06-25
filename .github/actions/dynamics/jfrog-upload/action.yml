@@ -52,8 +52,11 @@ inputs:
   jfrog_url:
     description: 'JFrog Artifactory base URL'
     required: true
-  jfrog_repo:
-    description: 'JFrog repository name'
+  jfrog_repo_solutions:
+    description: 'JFrog repository for solution ZIPs (managed + unmanaged)'
+    required: true
+  jfrog_repo_sarif:
+    description: 'JFrog repository for Solution Checker SARIF reports'
     required: true
   run_number:
     description: 'GitHub run number'
@@ -69,7 +72,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Upload artifacts to JFrog
+    - name: Upload solution ZIPs to JFrog
       shell: pwsh
       run: |
         $scriptPath = ".ci/.github/scripts/dynamics/Invoke-JFrogAction.ps1"
@@ -79,8 +82,39 @@ runs:
           -SolutionName "${{ inputs.solution_name }}" `
           -RepoName     "$env:GITHUB_REPOSITORY" `
           -LocalPath    $localPath `
+          -FileFilter   "*.zip" `
           -JFrogUrl     "${{ inputs.jfrog_url }}" `
-          -JFrogRepo    "${{ inputs.jfrog_repo }}" `
+          -JFrogRepo    "${{ inputs.jfrog_repo_solutions }}" `
+          -RunNumber    "${{ inputs.run_number }}" `
+          -RunAttempt   "${{ inputs.run_attempt }}" `
+          -MockDeploy:$${{ inputs.mock_deploy == 'true' }} `
+          -JFrogToken   "${{ env.JFROG_TOKEN }}"
+
+    - name: Upload SARIF report to JFrog
+      shell: pwsh
+      run: |
+        $scriptPath = ".ci/.github/scripts/dynamics/Invoke-JFrogAction.ps1"
+        # Locate the SARIF file via the sidecar path file written by solution-checker
+        $sarifPath = $null
+        $pathFile = Get-ChildItem -Path "." -Recurse -Filter "sarif.path" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($pathFile) {
+          $candidate = (Get-Content $pathFile.FullName -Raw).Trim()
+          if ($candidate -and $candidate -ne 'not-found' -and (Test-Path $candidate)) {
+            $sarifPath = Split-Path $candidate -Parent
+          }
+        }
+        if (-not $sarifPath) {
+          Write-Host "::notice::No SARIF report found — skipping SARIF upload to JFrog."
+          exit 0
+        }
+        & $scriptPath `
+          -Action       "upload" `
+          -SolutionName "${{ inputs.solution_name }}" `
+          -RepoName     "$env:GITHUB_REPOSITORY" `
+          -LocalPath    $sarifPath `
+          -FileFilter   "*.sarif" `
+          -JFrogUrl     "${{ inputs.jfrog_url }}" `
+          -JFrogRepo    "${{ inputs.jfrog_repo_sarif }}" `
           -RunNumber    "${{ inputs.run_number }}" `
           -RunAttempt   "${{ inputs.run_attempt }}" `
           -MockDeploy:$${{ inputs.mock_deploy == 'true' }} `
