@@ -120,13 +120,13 @@ function Format-CommitLine {
 # ═══════════════════════════════════════════════════════════════════════════════
 if (-not $BaseSha) {
     # Prefer the last merge commit on origin/main — that marks the previous release
-    $mergeLog = Invoke-Git @('log', '--merges', '--format=%H', '-n', '1', 'origin/main')
+    $mergeLog = @(Invoke-Git @('log', '--merges', '--format=%H', '-n', '1', 'origin/main'))
     if ($mergeLog.Count -gt 0 -and $mergeLog[0]) {
         $BaseSha = $mergeLog[0].Trim()
         Write-Host "ℹ️  Baseline: last merge on origin/main → $($BaseSha.Substring(0, 7))"
     } else {
         # First pipeline run ever — include all history from the initial commit
-        $rootLog = Invoke-Git @('rev-list', '--max-parents=0', 'HEAD')
+        $rootLog = @(Invoke-Git @('rev-list', '--max-parents=0', 'HEAD'))
         if ($rootLog.Count -gt 0 -and $rootLog[0]) {
             $BaseSha = $rootLog[0].Trim()
             Write-Host "ℹ️  No prior merges found — baseline: initial commit $($BaseSha.Substring(0, 7))"
@@ -162,7 +162,7 @@ if (Test-Path $solJsonFull) {
 # ═══════════════════════════════════════════════════════════════════════════════
 # Step 3 — Collect all commits in range (for the "Pipeline / CI" residual)
 # ═══════════════════════════════════════════════════════════════════════════════
-$allCommitLines = Invoke-Git @('log', '--oneline', $range)
+$allCommitLines = @(Invoke-Git @('log', '--oneline', $range))
 $totalCommits   = $allCommitLines.Count
 
 # Build a set of short SHAs that belong to at least one solution section
@@ -180,7 +180,7 @@ foreach ($sol in $solutions) {
         "src/solutions/$($sol.name)"
     }
 
-    $commits = Invoke-Git @('log', '--oneline', $range, '--', $folder)
+    $commits = @(Invoke-Git @('log', '--oneline', $range, '--', $folder))
 
     if ($commits.Count -gt 0) {
         $formatted = @($commits | ForEach-Object { Format-CommitLine $_ })
